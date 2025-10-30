@@ -148,6 +148,3 @@ async def generate_report(score: int, model: str) -> Tuple[str, Optional[str]]:
     
     template_report = generate_template_report(score, model)
     return template_report, error
-
-
-from typing import Tuple
