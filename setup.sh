@@ -7,27 +7,36 @@ set -e
 
 echo "🔧 Setting up GAIC Detector Web GUI..."
 
+# Check for conda
+if ! command -v conda &> /dev/null
+then
+    echo "❌ Conda is not installed. Please install Conda to continue."
+    exit 1
+fi
+
+# Create conda environment
+ENV_NAME="gaic-detector"
+if ! conda env list | grep -q $ENV_NAME; then
+    echo "📦 Creating conda environment '$ENV_NAME' with Python 3.10..."
+    conda create -n $ENV_NAME python=3.10 -y
+else
+    echo "✅ Conda environment '$ENV_NAME' already exists"
+fi
+
+# Activate conda environment
+eval "$(conda shell.bash hook)"
+conda activate $ENV_NAME
+
 # Check Python version
 PYTHON_VERSION=$(python3 --version 2>&1 | grep -oP '\d+\.\d+')
-REQUIRED_VERSION="3.8"
+REQUIRED_VERSION="3.10"
 
-if (( $(echo "$PYTHON_VERSION < $REQUIRED_VERSION" | bc -l) )); then
-    echo "❌ Python $REQUIRED_VERSION or higher is required (found $PYTHON_VERSION)"
+if [[ ! "$PYTHON_VERSION" == "$REQUIRED_VERSION"* ]]; then
+    echo "❌ Python $REQUIRED_VERSION is required (found $PYTHON_VERSION)"
     exit 1
 fi
 
 echo "✅ Python version: $PYTHON_VERSION"
-
-# Create virtual environment
-if [ ! -d "venv" ]; then
-    echo "📦 Creating virtual environment..."
-    python3 -m venv venv
-else
-    echo "✅ Virtual environment already exists"
-fi
-
-# Activate virtual environment
-source venv/bin/activate
 
 # Upgrade pip
 echo "⬆️  Upgrading pip..."

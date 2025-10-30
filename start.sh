@@ -7,14 +7,16 @@ set -e
 
 echo "🚀 Starting GAIC Detector Web GUI..."
 
-# Check if virtual environment exists
-if [ ! -d "venv" ]; then
-    echo "❌ Virtual environment not found. Please run setup.sh first."
+# Check for conda
+if ! command -v conda &> /dev/null; then
+    echo "❌ Conda not found. Please install Conda or run setup.sh first."
     exit 1
 fi
 
-# Activate virtual environment
-source venv/bin/activate
+# Activate conda environment
+ENV_NAME="gaic-detector"
+eval "$(conda shell.bash hook)"
+conda activate $ENV_NAME
 
 # Start backend API in background
 echo "📡 Starting backend API on port 8000..."

@@ -132,42 +132,56 @@ python gradio_app.py
 
 ### Q1: 模型權重檔案在哪裡？
 
-**答**: 由於實際的模型權重檔案可能很大（數百MB），且需要從原始來源取得，專案包含：
+**答**: 專案現在包含**實際可用的模型**！
 
-1. **Mock 模型系統**（已實現）
-   - 無需實際權重即可運行
-   - 基於圖片統計特徵生成真實的分數
-   - 適合測試 UI/UX 和系統整合
+1. **自動下載腳本**（✅ 已實現）
+   ```bash
+   ./download_models.sh
+   ```
+   - 自動從 Hugging Face 和 Google Drive 下載
+   - 包含三個真實模型：SuSy、FatFormer、DistilDIRE
+   - 總大小約 450MB
 
-2. **模型來源指南** (`docs/MODEL_SOURCES.md`)
-   - 列出可能的模型來源
-   - 提供替代模型建議
-   - 包含整合說明
+2. **模型清單**:
+   - **SuSy.pt** (~100MB) - TorchScript 格式，來自 HPAI-BSC
+   - **fatformer_4class_ckpt.pth** (~200MB) - 4-class checkpoint
+   - **distildire-imagenet-11e.pth** (~150MB) - ImageNet 預訓練
 
-3. **下載腳本** (`download_models.sh`)
-   - 包含模型下載框架
-   - 需要更新實際的下載 URL
+3. **Mock 模式後備**:
+   - 如果模型檔案缺失，系統自動切換到 Mock 模式
+   - 適合測試和展示
 
-### Q2: 如何獲取實際模型？
+### Q2: 如何下載和使用實際模型？
 
-**選項 1 - 使用開源模型** (推薦):
+**方法 1 - 一鍵下載** (推薦):
 
 ```bash
-# 範例：使用 UnivFD (Universal Fake Detector)
-git clone https://github.com/Yuheng-Li/UniversalFakeDetect
-# 下載其預訓練權重
-# 適配到 app/models.py
+# 自動下載所有三個模型
+./download_models.sh
 ```
 
-**選項 2 - 搜尋研究論文**:
-- arXiv: "AI-generated image detection"
-- Papers with Code: deepfake detection
-- GitHub: "fake image detection"
+**方法 2 - 手動下載**:
 
-**選項 3 - 使用 Mock 模式**:
-- 無需額外操作
-- 系統會自動檢測並使用 Mock 模型
-- 適合展示和開發
+```bash
+# SuSy (Hugging Face)
+wget -O models/weights/susy.pt \
+  https://huggingface.co/HPAI-BSC/SuSy/resolve/main/SuSy.pt
+
+# FatFormer (Google Drive)
+pip install gdown
+gdown https://drive.google.com/uc?id=1Q_Kgq4ygDf8XEHgAf-SgDN6Ru_IOTLkj \
+  -O models/weights/fatformer_4class_ckpt.pth
+
+# DistilDIRE (Hugging Face)
+wget -O models/weights/distildire-imagenet-11e.pth \
+  https://huggingface.co/yevvonlim/distildire/resolve/main/imagenet-distil-dire-11e.pth
+```
+
+**驗證下載**:
+```bash
+ls -lh models/weights/
+# 應該看到三個檔案，總計約 450MB
+```
 
 ### Q3: LLM 報告生成如何配置？
 

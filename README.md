@@ -5,7 +5,7 @@
 A complete web-based demo application for detecting AI-generated images using multiple detection models. Features a FastAPI backend and Gradio frontend with real-time analysis, heatmap visualization, and detailed reporting.
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![Python](https://img.shields.io/badge/python-3.8%2B-green)
+![Python](https://img.shields.io/badge/python-3.10-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 ## 🌟 Features
@@ -20,7 +20,8 @@ A complete web-based demo application for detecting AI-generated images using mu
 
 ## 📋 Requirements
 
-- Python 3.8 or higher
+- Python 3.10
+- Conda
 - CUDA-capable GPU (recommended) or CPU
 - 4GB+ RAM
 - Modern web browser
@@ -34,9 +35,9 @@ A complete web-based demo application for detecting AI-generated images using mu
 git clone https://github.com/thedannyliu/GAIC-Detector-Web-GUI.git
 cd GAIC-Detector-Web-GUI
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Create and activate conda environment
+conda create -n gaic-detector python=3.10 -y
+conda activate gaic-detector
 
 # Install dependencies
 pip install -r requirements.txt
