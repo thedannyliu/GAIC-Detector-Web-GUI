@@ -1,7 +1,7 @@
 """Report generation with LLM and template fallback."""
 
 import asyncio
-from typing import Optional
+from typing import Optional, Tuple
 
 from app.config import LLM_ENABLED, LLM_API_KEY, LLM_MODEL, TIMEOUT_LLM
 
