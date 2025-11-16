@@ -1,35 +1,42 @@
 # GAIC Detector Web GUI - Requirements
-# Updated: 2025-01-14 for AIDE + Grad-CAM + Video + Gemini integration
+# Updated: 2025-11-16 for AIDE + Grad-CAM + Video + Gemini integration
 
 # Core web frameworks
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-gradio==4.44.0
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+gradio>=4.44.0
 
 # Image and Video processing
-Pillow==10.1.0
-numpy==1.24.3
-opencv-python==4.8.1.78
+Pillow>=10.1.0
+numpy>=1.24.3,<2.0.0
+opencv-python>=4.8.1
 
 # ML frameworks (for AIDE model inference)
-torch==2.1.0
-torchvision==0.16.0
+# For GPU: Install PyTorch with CUDA from https://pytorch.org
+# For CPU: These versions work fine
+torch>=2.1.0
+torchvision>=0.16.0
 
 # Grad-CAM for explainability
-grad-cam==1.5.0
+grad-cam>=1.5.0
+
+# AIDE model dependencies
+open-clip-torch>=2.24.0
+timm>=0.9.6
+einops>=0.6.1
 
 # Visualization
-matplotlib==3.8.2
+matplotlib>=3.8.0
 
 # HTTP client
-requests==2.31.0
+requests>=2.31.0
 
 # Data validation
-pydantic==2.5.0
+pydantic>=2.5.0
 
 # LLM integration - Google Gemini
-google-generativeai==0.3.2
+google-generativeai>=0.3.2
 
 # Development tools
-python-multipart==0.0.9
-python-dotenv==1.0.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.0
