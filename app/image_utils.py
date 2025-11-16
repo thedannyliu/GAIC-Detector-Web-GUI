@@ -6,14 +6,14 @@ from typing import Tuple, Optional
 from PIL import Image, ImageOps
 import numpy as np
 
-from app.config import MAX_LONG_SIDE, SUPPORTED_FORMATS
+from app.config import MAX_LONG_SIDE, SUPPORTED_IMAGE_FORMATS
 from app.errors import GAICException, ErrorCode
 
 
 def validate_image_format(filename: str) -> None:
     """Validate image file format."""
     ext = filename.lower().split('.')[-1]
-    if ext not in SUPPORTED_FORMATS:
+    if ext not in SUPPORTED_IMAGE_FORMATS:
         raise GAICException(ErrorCode.IMG_FORMAT_UNSUPPORTED)
 
 
