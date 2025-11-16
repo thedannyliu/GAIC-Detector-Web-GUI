@@ -67,7 +67,7 @@ GEMINI_API_KEY = os.getenv(
     "GEMINI_API_KEY", 
     "AIzaSyDcpP36XpRgiA7qM-82yLn0SAqyxrEn4aM"  # Default free-tier key
 )
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-1.5-flash-latest"  # 使用 -latest 版本
 GEMINI_TIMEOUT = TIMEOUT_LLM
 
 # ============================================

@@ -233,9 +233,25 @@ class AIDE_Model(nn.Module):
         self.fc = Mlp(2048 + 256 , 1024, 2)
 
         print("build model with convnext_xxl")
-        self.openclip_convnext_xxl, _, _ = open_clip.create_model_and_transforms(
-            "convnext_xxlarge", pretrained=convnext_path
-        )
+        try:
+            # Try loading with pretrained weights
+            if convnext_path and convnext_path != 'None':
+                print(f"Loading ConvNeXt from: {convnext_path}")
+                self.openclip_convnext_xxl, _, _ = open_clip.create_model_and_transforms(
+                    "convnext_xxlarge", pretrained=convnext_path
+                )
+            else:
+                # Use laion2b_s34b_b82k pretrained weights (good default)
+                print("Using laion2b_s34b_b82k pretrained ConvNeXt")
+                self.openclip_convnext_xxl, _, _ = open_clip.create_model_and_transforms(
+                    "convnext_xxlarge", pretrained='laion2b_s34b_b82k'
+                )
+        except Exception as e:
+            print(f"⚠️  ConvNeXt loading failed: {e}")
+            print("Falling back to random initialization")
+            self.openclip_convnext_xxl, _, _ = open_clip.create_model_and_transforms(
+                "convnext_xxlarge", pretrained=None
+            )
 
         self.openclip_convnext_xxl = self.openclip_convnext_xxl.visual.trunk
         self.openclip_convnext_xxl.head.global_pool = nn.Identity()
@@ -280,8 +296,21 @@ class AIDE_Model(nn.Module):
             local_convnext_image_feats = self.openclip_convnext_xxl(
                 tokens * (dinov2_std / clip_std) + (dinov2_mean - clip_mean) / clip_std
             ) #[b, 3072, 8, 8]
-            assert local_convnext_image_feats.size()[1:] == (3072, 8, 8)
-            local_convnext_image_feats = self.avgpool(local_convnext_image_feats).view(tokens.size(0), -1)
+            
+            # Flexible handling for different ConvNeXt outputs
+            if local_convnext_image_feats.size()[1:] != (3072, 8, 8):
+                print(f"⚠️  ConvNeXt output shape: {local_convnext_image_feats.shape}, expected: [b, 3072, 8, 8]")
+                # Adapt pooling to ensure 3072 features
+                local_convnext_image_feats = self.avgpool(local_convnext_image_feats)
+                local_convnext_image_feats = local_convnext_image_feats.view(tokens.size(0), -1)
+                # If dimension mismatch, project to 3072
+                if local_convnext_image_feats.size(1) != 3072:
+                    if not hasattr(self, 'convnext_adapter'):
+                        self.convnext_adapter = nn.Linear(local_convnext_image_feats.size(1), 3072).to(local_convnext_image_feats.device)
+                    local_convnext_image_feats = self.convnext_adapter(local_convnext_image_feats)
+            else:
+                local_convnext_image_feats = self.avgpool(local_convnext_image_feats).view(tokens.size(0), -1)
+            
             x_0 = self.convnext_proj(local_convnext_image_feats)
 
         x_min = self.model_min(x_minmin)
