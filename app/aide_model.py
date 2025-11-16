@@ -1,6 +1,8 @@
 """AIDE Model implementation with Grad-CAM support."""
 
+import os
 import time
+from pathlib import Path
 from typing import Tuple, Optional
 import numpy as np
 import torch
@@ -54,11 +56,41 @@ class AIDeDetector(nn.Module):
 class AIDeInference:
     """Inference wrapper for AIDE model with Grad-CAM support."""
     
-    def __init__(self):
+    def __init__(self, checkpoint_path: Optional[str] = None):
         """Initialize AIDE model and preprocessing."""
-        print(f"Initializing AIDE model on device: {torch.device('cuda' if torch.cuda.is_available() else 'cpu')}")
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Initializing AIDE model on device: {device}")
         
+        # Create model
         self.model = AIDeDetector(pretrained=True)
+        
+        # Try to load checkpoint if available
+        if checkpoint_path is None:
+            # Look for default checkpoint
+            project_root = Path(__file__).parent.parent
+            checkpoint_path = project_root / "models" / "weights" / "aide_resnet50.pth"
+        
+        if isinstance(checkpoint_path, str):
+            checkpoint_path = Path(checkpoint_path)
+        
+        if checkpoint_path.exists():
+            print(f"Loading AIDE checkpoint from: {checkpoint_path}")
+            try:
+                checkpoint = torch.load(checkpoint_path, map_location=device)
+                if 'model_state_dict' in checkpoint:
+                    self.model.load_state_dict(checkpoint['model_state_dict'])
+                    print("✅ Loaded fine-tuned AIDE weights")
+                else:
+                    self.model.load_state_dict(checkpoint)
+                    print("✅ Loaded AIDE weights")
+            except Exception as e:
+                print(f"⚠️  Failed to load checkpoint: {e}")
+                print("   Using pretrained ResNet-50 backbone with random classifier")
+        else:
+            print(f"⚠️  No checkpoint found at: {checkpoint_path}")
+            print("   Using pretrained ResNet-50 backbone with random classifier")
+            print("   For production use, please fine-tune the model first!")
+        
         self.model.eval()
         
         # ImageNet normalization (ResNet-50 was pre-trained on ImageNet)

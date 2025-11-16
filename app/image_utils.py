@@ -56,20 +56,20 @@ def load_and_preprocess_image(image_bytes: bytes) -> Tuple[np.ndarray, Image.Ima
         raise GAICException(ErrorCode.IMG_DECODE_FAILED, str(e))
 
 
-def create_heatmap_overlay(
+def create_gradcam_overlay(
     original_image: Image.Image,
-    heatmap: np.ndarray,
+    gradcam_heatmap: np.ndarray,
     alpha: float = 0.5,
     colormap: str = 'viridis'
 ) -> Optional[str]:
     """
-    Create heatmap overlay on original image.
+    Create Grad-CAM heatmap overlay on original image.
     
     Args:
         original_image: PIL Image (RGB)
-        heatmap: 2D numpy array with values 0-1
-        alpha: Overlay transparency
-        colormap: Colormap name
+        gradcam_heatmap: 2D numpy array with values 0-1 (from pytorch-grad-cam)
+        alpha: Overlay transparency (0.5 = 50% heatmap + 50% original)
+        colormap: Colormap name (viridis, jet, etc.)
         
     Returns:
         Base64 encoded PNG or None on error
@@ -78,29 +78,47 @@ def create_heatmap_overlay(
         import matplotlib.pyplot as plt
         from matplotlib import cm
         
-        # Resize heatmap to match image size
-        heatmap_resized = Image.fromarray((heatmap * 255).astype(np.uint8))
+        # Convert original image to numpy array
+        original_array = np.array(original_image).astype(np.float32) / 255.0
+        
+        # Resize Grad-CAM heatmap to match original image size
+        heatmap_resized = Image.fromarray((gradcam_heatmap * 255).astype(np.uint8))
         heatmap_resized = heatmap_resized.resize(original_image.size, Image.BILINEAR)
-        heatmap_array = np.array(heatmap_resized) / 255.0
+        heatmap_array = np.array(heatmap_resized).astype(np.float32) / 255.0
         
-        # Apply colormap
+        # Apply colormap to heatmap
         cmap = cm.get_cmap(colormap)
-        colored_heatmap = cmap(heatmap_array)
-        colored_heatmap = (colored_heatmap[:, :, :3] * 255).astype(np.uint8)
+        colored_heatmap = cmap(heatmap_array)[:, :, :3]  # Remove alpha channel
         
-        # Create overlay
-        original_array = np.array(original_image)
-        overlay = (alpha * colored_heatmap + (1 - alpha) * original_array).astype(np.uint8)
+        # Blend: alpha * heatmap + (1-alpha) * original
+        overlay = (alpha * colored_heatmap + (1 - alpha) * original_array)
+        overlay = (overlay * 255).astype(np.uint8)
         
-        # Convert to base64
+        # Convert to PIL and encode as base64
         overlay_image = Image.fromarray(overlay)
         buffer = io.BytesIO()
         overlay_image.save(buffer, format='PNG')
         return base64.b64encode(buffer.getvalue()).decode('utf-8')
         
     except Exception as e:
-        print(f"Heatmap overlay error: {e}")
+        print(f"Grad-CAM overlay error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
+
+
+def create_heatmap_overlay(
+    original_image: Image.Image,
+    heatmap: np.ndarray,
+    alpha: float = 0.5,
+    colormap: str = 'viridis'
+) -> Optional[str]:
+    """
+    Create heatmap overlay on original image (legacy wrapper).
+    
+    Calls create_gradcam_overlay.
+    """
+    return create_gradcam_overlay(original_image, heatmap, alpha, colormap)
 
 
 def image_to_base64(image: Image.Image, max_size: Optional[int] = None) -> str:
