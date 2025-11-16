@@ -65,3 +65,4 @@ htmlcov/
 # Gradio cache
 gradio_cached_examples/
 flagged/
+backend.pid
