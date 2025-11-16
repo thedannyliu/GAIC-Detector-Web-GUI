@@ -41,10 +41,10 @@ VIDEO_MAX_DURATION = 300  # Maximum video duration in seconds (5 min)
 # ============================================
 # TIMEOUT SETTINGS (seconds)
 # ============================================
-TIMEOUT_TOTAL = 40
-TIMEOUT_DEGRADE = 25
-TIMEOUT_SKIP_HEATMAP = 35
-TIMEOUT_LLM = 2
+TIMEOUT_TOTAL = 120  # 增加到 2 分鐘
+TIMEOUT_DEGRADE = 90
+TIMEOUT_SKIP_HEATMAP = 100
+TIMEOUT_LLM = 30  # Gemini 超時增加到 30 秒
 
 # ============================================
 # MODEL SETTINGS - AIDE ONLY
