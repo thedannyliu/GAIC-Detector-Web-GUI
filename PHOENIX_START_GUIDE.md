@@ -1,6 +1,24 @@
 # 🚀 Phoenix GPU Cluster 啟動指南
 
-## 方法 1: 使用兩個 Jupyter Cells（推薦）
+## 🎯 最簡單方式：一鍵啟動（強烈推薦）
+
+```bash
+cd ~/r-agarg35-0/projects/GAIC-Detector-Web-GUI
+./start_all.sh
+```
+
+這會自動：
+- ✅ 停止舊的進程
+- ✅ 在背景啟動後端
+- ✅ 等待後端就緒
+- ✅ 啟動前端（Gradio Share 自動啟用）
+- ✅ 按 Ctrl+C 時自動清理
+
+**就這麼簡單！** 等待出現 Gradio URL 即可使用。
+
+---
+
+## 方法 1: 使用兩個 Jupyter Cells
 
 ### Cell 1 - 啟動後端
 ```bash
