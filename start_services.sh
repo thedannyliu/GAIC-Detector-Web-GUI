@@ -79,20 +79,11 @@ echo "正在啟動 backend..."
 echo "這可能需要 10-30 秒 (載入 AIDE 模型權重 3.35GB)"
 echo ""
 
-# 先測試能否啟動（前景運行 5 秒檢查錯誤）
-timeout 5 conda run -n "$ENV_NAME" python -m app.main > backend.log 2>&1 || true
+# 清空舊的 log
+> backend.log
 
-# 檢查是否有明顯錯誤
-if grep -iq "error\|traceback\|exception" backend.log | head -20; then
-    echo "❌ Backend 啟動時發現錯誤:"
-    echo ""
-    cat backend.log
-    echo ""
-    exit 1
-fi
-
-# 正式啟動（背景運行）
-conda run -n "$ENV_NAME" python -m app.main >> backend.log 2>&1 &
+# 啟動 backend（背景運行）
+conda run -n "$ENV_NAME" python -m app.main > backend.log 2>&1 &
 BACKEND_PID=$!
 echo $BACKEND_PID > backend.pid
 echo "Backend PID: $BACKEND_PID"
@@ -101,32 +92,65 @@ echo ""
 
 # 等待 backend 啟動（模型載入需要時間）
 echo "等待 backend 啟動（載入模型中...）"
-for i in {1..30}; do
-    if curl -s http://localhost:8000/ > /dev/null 2>&1; then
-        echo "✅ Backend 啟動成功 (http://localhost:8000)"
-        break
-    fi
-    
+echo "這個過程需要時間，請耐心等待..."
+echo ""
+
+MAX_WAIT=45  # 最多等待 45 秒
+WAITED=0
+
+while [ $WAITED -lt $MAX_WAIT ]; do
     # 檢查進程是否還活著
     if ! kill -0 $BACKEND_PID 2>/dev/null; then
+        echo ""
         echo "❌ Backend 進程已結束"
         echo ""
-        echo "最後 30 行 log:"
-        tail -30 backend.log
+        echo "Backend log:"
+        cat backend.log
+        echo ""
         exit 1
     fi
     
+    # 檢查是否有錯誤訊息
+    if grep -qi "error.*failed\|traceback\|fatal" backend.log 2>/dev/null; then
+        echo ""
+        echo "❌ Backend 啟動時發現錯誤"
+        echo ""
+        echo "Backend log:"
+        cat backend.log
+        echo ""
+        kill $BACKEND_PID 2>/dev/null || true
+        exit 1
+    fi
+    
+    # 檢查是否成功啟動
+    if curl -s http://localhost:8000/ > /dev/null 2>&1; then
+        echo ""
+        echo "✅ Backend 啟動成功 (http://localhost:8000)"
+        echo ""
+        break
+    fi
+    
     echo -n "."
-    sleep 1
+    sleep 2
+    WAITED=$((WAITED + 2))
 done
-echo ""
 
 # 最終檢查
-if ! curl -s http://localhost:8000/ > /dev/null 2>&1; then
-    echo "❌ Backend 啟動失敗或響應超時"
+if [ $WAITED -ge $MAX_WAIT ]; then
+    echo ""
+    echo "❌ Backend 啟動超時 (${MAX_WAIT}秒)"
     echo ""
     echo "Backend log (最後 50 行):"
     tail -50 backend.log
+    echo ""
+    echo "可能原因:"
+    echo "  1. 模型權重載入需要更長時間（正常現象）"
+    echo "  2. GPU/記憶體不足"
+    echo "  3. 依賴套件缺失"
+    echo ""
+    echo "建議:"
+    echo "  1. 手動啟動查看完整錯誤: conda activate gaic-detector && python -m app.main"
+    echo "  2. 檢查是否有足夠的 GPU 記憶體"
     echo ""
     kill $BACKEND_PID 2>/dev/null || true
     exit 1
