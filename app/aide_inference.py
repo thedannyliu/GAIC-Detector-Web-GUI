@@ -15,6 +15,7 @@ from pathlib import Path
 import time
 from typing import Tuple, Optional
 import numpy as np
+import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -122,32 +123,49 @@ class AIDeInferenceWrapper:
             mean=[0.48145466, 0.4578275, 0.40821073],
             std=[0.26862954, 0.26130258, 0.27577711]
         )
+
+        # Grad-CAM target layer for low-level artifact branch (HPF + ResNet)
+        # We hook into the last conv block of the ResNet that processes HPF features.
+        self.artifact_target_layers = []
+        try:
+            # AIDE_Model defines model_min as a ResNet with .layer4
+            self.artifact_target_layers = [self.model.model_min.layer4]
+            print("Grad-CAM target layer (artifact branch): model_min.layer4")
+        except AttributeError:
+            # Fail gracefully – heatmaps will be skipped but scoring still works.
+            print("⚠️  Could not locate model_min.layer4 for Grad-CAM; "
+                  "heatmaps will be disabled.")
     
     def prepare_inputs(self, image: np.ndarray) -> torch.Tensor:
         """
-        Prepare 5-channel input for AIDE model.
+        Prepare input for AIDE model.
         
         Args:
             image: RGB numpy array (H, W, 3), values 0-255
             
         Returns:
-            Tensor of shape (1, 5, 3, H, W)
+            Tensor of shape [1, 5, 3, H, W] where:
+            - dim 0: batch
+            - dim 1: 5 different inputs (4 ResNet + 1 ConvNeXt)
+            - dim 2-4: channel, height, width
         """
         # Convert to PIL and resize
         pil_image = Image.fromarray(image.astype('uint8'), 'RGB')
         
-        # Transform to tensor
-        img_tensor = self.transform(pil_image)  # [3, H, W]
+        # Transform to tensor [3, H, W]
+        img_tensor = self.transform(pil_image)
         
-        # For simplicity in web service, we use the same image for all inputs
+        # For simplicity, use same image for all 4 ResNet branches
         # In production, you might want to implement proper min/max pooling
         x_minmin = img_tensor
         x_maxmax = img_tensor
         x_minmin1 = img_tensor
         x_maxmax1 = img_tensor
-        tokens = self.normalize_convnext(img_tensor)  # ConvNeXt normalization
         
-        # Stack all inputs: [5, 3, H, W]
+        # ConvNeXt branch needs different normalization
+        tokens = self.normalize_convnext(img_tensor)
+        
+        # Stack: [5, 3, H, W]
         inputs = torch.stack([x_minmin, x_maxmax, x_minmin1, x_maxmax1, tokens], dim=0)
         
         # Add batch dimension: [1, 5, 3, H, W]
@@ -212,25 +230,25 @@ class AIDeInferenceWrapper:
             Tuple of (fake_probability, heatmap_array or None)
         """
         try:
+            # Prepare inputs as single tensor [1, 5, 3, H, W]
+            inputs = self.prepare_inputs(image)
+            
+            # Forward pass
+            self.model.eval()
             with torch.no_grad():
-                # Prepare inputs
-                inputs = self.prepare_inputs(image)
-                
-                # Forward pass
                 output = self.model(inputs)  # [1, 2]
                 probabilities = F.softmax(output, dim=1)
-                
-                # Extract fake probability (class 1)
-                fake_prob = probabilities[0, 1].item()
             
-            # Generate simplified Grad-CAM
+            # Extract fake probability (class 1)
+            fake_prob = probabilities[0, 1].item()
+            
+            # Generate Grad-CAM heatmap on the artifact (HPF + ResNet) branch
             heatmap = None
             if include_heatmap:
                 try:
-                    heatmap = self._generate_simple_gradcam(image, fake_prob)
-                    print("✅ Grad-CAM heatmap generated")
+                    heatmap = self._generate_artifact_gradcam(inputs)
                 except Exception as e:
-                    print(f"⚠️  Grad-CAM generation failed: {e}")
+                    print(f"⚠️  Grad-CAM heatmap generation failed: {e}")
                     heatmap = None
             
             return fake_prob, heatmap
@@ -240,6 +258,34 @@ class AIDeInferenceWrapper:
             import traceback
             traceback.print_exc()
             raise GAICException(ErrorCode.MODEL_ERROR, str(e))
+    
+    def _generate_artifact_gradcam(self, inputs: torch.Tensor) -> np.ndarray:
+        """
+        Generate a Grad-CAM heatmap on the low-level artifact branch (HPF + ResNet).
+        
+        Args:
+            inputs: AIDE input tensor of shape [1, 5, 3, H, W]
+        
+        Returns:
+            2D numpy array (H', W') with values in [0, 1]
+        """
+        if not self.artifact_target_layers:
+            raise RuntimeError("Grad-CAM target layers are not configured.")
+
+        targets = [ClassifierOutputTarget(1)]  # class index 1 = fake / AI-generated
+
+        # GradCAM will internally run a forward + backward pass with gradients enabled.
+        # Note: In newer pytorch-grad-cam versions, use_cuda parameter is removed.
+        # The device is automatically detected from the model.
+        with GradCAM(
+            model=self.model,
+            target_layers=self.artifact_target_layers
+        ) as cam:
+            grayscale_cam = cam(input_tensor=inputs, targets=targets)
+            # Batch size is 1 → take the first CAM
+            grayscale_cam = grayscale_cam[0, :]
+
+        return grayscale_cam
 
 
 # Global model instance (lazy loading)
