@@ -443,15 +443,21 @@ From the Web-GUI perspective:
 
   - Runs AIDE to obtain logits / fake probability.
   - Maps internal probability to integer 0..100 (`score`).
-  - Uses Grad-CAM (or Grad-CAM++) on AIDE’s classifier head to produce **heatmap PNGs**:
-    - For image: Grad-CAM over the input image → 1 heatmap.
+  - Uses Grad-CAM (or Grad-CAM++) on AIDE’s **low-level artifact branch** (HPF + ResNet-50) to produce 2D heatmaps, then renders **heatmap PNGs** server-side:
+    - For image:
+      - Back-end runs AIDE once to get `fake_prob`.
+      - If `include_heatmap=true`, back-end runs Grad-CAM with
+        - `model = AIDE_Model` (official implementation in `app/aide_original/AIDE.py`),
+        - `target_layers = [model.model_min.layer4]` (last conv block of the HPF+ResNet branch),
+        - class index `1` (fake / AI-generated) as the Grad-CAM target.
+      - Grad-CAM returns a **single-channel 2D map in [0,1]**, which is resized and overlaid on the original image using `create_gradcam_overlay` in `app/image_utils.py`.
     - For video:
       - Sample e.g. 16 frames across the clip.
-      - For each frame: run AIDE → per-frame score + Grad-CAM heatmap.
+      - For each frame: run AIDE → per-frame score + Grad-CAM heatmap (same artifact-branch Grad-CAM as image).
       - Select top-k suspicious frames by score (e.g., top 3) for explanation and UI (key frame).
       - Aggregate frame scores into a video-level score (default: take the **max** of all frame scores).
 
-- All Grad-CAM rendering (color map, alpha blending) is done server-side; front-end receives ready-to-display PNGs as Base64 strings.
+- All Grad-CAM rendering (color map, alpha blending) is done server-side; front-end receives ready-to-display **PNG overlays** as Base64 strings (`heatmap_png_b64`).
 
 ---
 
@@ -645,23 +651,59 @@ UI behavior:
 
 ### 16.1 Model Architecture
 
-**AIDE (AI-generated Image DEtector with Hybrid Features)**
+**AIDE (AI-generated Image DEtector with Hybrid Features)** — implementation used in this repo (`app/aide_original/AIDE.py` + `app/aide_inference.py`):
 
-- **Backbone**: ResNet-50 pre-trained on ImageNet
-- **Classifier Head**: 2-class output (Real / AI-generated)
-- **Input Size**: 224×224 RGB images
-- **Normalization**: ImageNet mean/std normalization
-- **Output**: Softmax probabilities [real_prob, fake_prob]
+- **Inputs (server-side)**:
+  - Single RGB image (PIL / NumPy) from the request body.
+  - Back-end resizes to `AIDE_INPUT_SIZE` (currently **256×256**) and builds a tensor of shape `[1, 5, 3, H, W]`:
+    - 4 branches for HPF + ResNet:
+      - `x_minmin`, `x_maxmax`, `x_minmin1`, `x_maxmax1` (PoC: all share the same resized RGB image).
+    - 1 branch for semantic features:
+      - `tokens` (same image, normalized for ConvNeXt / CLIP).
+
+- **HPF + ResNet artifact branch** (low-level traces like noise / aliasing):
+  - `HPF` layer applies 30 fixed SRM high-pass filters to emphasize residual / noise patterns.
+  - Two ResNet-50 backbones (`model_min`, `model_max`), plus two additional variants (`x_minmin1`, `x_maxmax1`).
+  - Outputs from four ResNet passes are averaged into a 2048-dim feature `x_1`.
+
+- **ConvNeXt semantic branch** (high-level semantics / content cues):
+  - `openclip_convnext_xxl` trunk from OpenCLIP.
+  - Features are pooled and projected to 256-dim `x_0` via `convnext_proj`.
+
+- **Fusion + classifier**:
+  - Concatenate `[x_0, x_1]` → 2304-dim vector.
+  - Pass through an MLP (`self.fc`) to produce 2-class logits `[real_logit, fake_logit]`.
+  - `softmax` over logits gives `[real_prob, fake_prob]`.
 
 ### 16.2 Grad-CAM Implementation
 
-Using `pytorch-grad-cam` library:
+The production Grad-CAM path in this repo is implemented in `app/aide_inference.py` on top of the official AIDE model:
 
-- **Target Layer**: `model.layer4` (last conv block of ResNet-50)
-- **Method**: GradCAM (can upgrade to GradCAM++ or HiResCAM)
-- **Colormap**: viridis (color-blind friendly)
-- **Alpha Blending**: 0.5 (50% heatmap, 50% original image)
-- **Resolution**: Heatmap is resized to match input image resolution
+- **Library**: `pytorch-grad-cam` (`GradCAM` + `ClassifierOutputTarget`).
+- **Model passed to GradCAM**:
+  - The full `AIDE_Model` instance (created via `AIDE(...)` in `app/aide_original/AIDE.py`).
+- **Target class**:
+  - Class index `1` (fake / AI-generated): `ClassifierOutputTarget(1)`.
+- **Target layer (artifact heatmap)**:
+  - `self.model.model_min.layer4` — the last conv block of the HPF+ResNet branch.
+  - Configured once in `AIDeInferenceWrapper.__init__` as:
+    - `self.artifact_target_layers = [self.model.model_min.layer4]`.
+- **Input tensor to GradCAM**:
+  - Same 5-branch tensor `inputs` of shape `[1, 5, 3, H, W]` used for normal AIDE inference.
+- **GradCAM call (simplified)**:
+  - `with GradCAM(model=self.model, target_layers=self.artifact_target_layers) as cam:`
+    - `grayscale_cam = cam(input_tensor=inputs, targets=[ClassifierOutputTarget(1)])`
+    - `grayscale_cam = grayscale_cam[0, :]  # 2D map in [0,1]`
+- **Post-processing and rendering**:
+  - Back-end passes the 2D `grayscale_cam` and the original PIL image to `create_gradcam_overlay` in `app/image_utils.py`.
+  - That function:
+    - Resizes the heatmap to the original image size.
+    - Applies a color-blind-friendly colormap (default `viridis`).
+    - Blends heatmap and original image with alpha `GRADCAM_ALPHA` (default 0.5).
+    - Encodes the overlay as PNG Base64 (`heatmap_png_b64`) for the API response.
+
+> Advanced extension (not yet wired in the current code, but supported by the architecture):  
+> a second “semantic heatmap” can be built by pointing Grad-CAM at a ConvNeXt stage in `openclip_convnext_xxl`, then returning two separate 2D maps (artifact vs semantic) to the UI. The current PoC focuses on the artifact branch heatmap for simplicity.
 
 ### 16.3 Video Processing Strategy
 
@@ -835,6 +877,426 @@ export GEMINI_API_KEY="你的_API_key_字串"
 ### B.3 Backend Python example and free-tier behavior
 
 See **Appendix B** earlier in this document for a concrete Python example using `requests` and for notes on free-tier behavior when the Gemini API is heavily used.
+
+---
+
+## Appendix C: Grad-CAM Implementation Details (Technical Reference)
+
+This appendix provides complete technical documentation of the Grad-CAM implementation for developers working on the backend or extending the visualization features.
+
+### C.1 Overview
+
+The Grad-CAM (Gradient-weighted Class Activation Mapping) implementation highlights image regions that most strongly influence the AIDE model's AI-generation detection. This visual explanation helps users understand **why** the model assigns a particular score.
+
+**Key Design Decisions:**
+- Focus on the **artifact detection branch** (HPF + ResNet) rather than semantic branch
+- Generate heatmaps **server-side** to keep frontend lightweight
+- Return **Base64-encoded PNG overlays** ready for display
+- Implement **graceful degradation**: heatmap failures never block inference
+
+### C.2 Dependencies
+
+**Required Packages:**
+```bash
+# Install in the gaic-detector conda environment
+conda activate gaic-detector
+pip install grad-cam==1.5.5
+```
+
+**Import Statements:**
+```python
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+```
+
+**Version Compatibility:**
+- `pytorch >= 2.0`
+- `grad-cam >= 1.5.0`
+- Python 3.10+ (tested in gaic-detector environment)
+
+### C.3 Architecture Integration
+
+**AIDE Model Structure:**
+The AIDE model (`app/aide_original/AIDE.py`) has two parallel branches:
+
+1. **Artifact Branch** (Low-level forensic features):
+   ```
+   Input → HPF (30 SRM filters) → ResNet-50 (model_min/model_max) → Features
+   ```
+   - Detects: JPEG artifacts, GAN noise, aliasing, texture anomalies
+   - **Target layer for Grad-CAM**: `model.model_min.layer4`
+
+2. **Semantic Branch** (High-level content features):
+   ```
+   Input → ConvNeXt-XXL (OpenCLIP) → Projection → Features
+   ```
+   - Detects: Unnatural compositions, style mismatches
+   - Not currently used for Grad-CAM (future extension)
+
+**Why `model_min.layer4`?**
+- This is the last convolutional block before global pooling in the ResNet
+- At this layer, features are:
+  - Spatially localized (8×8 or 16×16 feature map)
+  - Semantically rich (captures complex forensic patterns)
+  - Directly connected to the classification head
+
+### C.4 Implementation Code
+
+**File: `app/aide_inference.py`**
+
+#### Initialization
+
+```python
+class AIDeInferenceWrapper:
+    def __init__(self, checkpoint_path=None, resnet_path=None, convnext_path=None):
+        # ... model loading code ...
+        
+        # Configure Grad-CAM target layer
+        self.artifact_target_layers = []
+        try:
+            # Point to the last conv block of the artifact (HPF+ResNet) branch
+            self.artifact_target_layers = [self.model.model_min.layer4]
+            print("Grad-CAM target layer (artifact branch): model_min.layer4")
+        except AttributeError:
+            # Graceful fallback: disable heatmaps if layer not found
+            print("⚠️ Could not locate model_min.layer4 for Grad-CAM")
+            print("   Heatmaps will be disabled but scoring will work")
+```
+
+#### Inference with Optional Heatmap
+
+```python
+def predict(
+    self,
+    image: np.ndarray,
+    include_heatmap: bool = True
+) -> Tuple[float, Optional[np.ndarray]]:
+    """
+    Run AIDE inference with optional Grad-CAM heatmap.
+    
+    Returns:
+        (fake_probability, heatmap_2d_array or None, inference_ms)
+    """
+    # 1. Prepare input tensor: [1, 5, 3, H, W]
+    inputs = self.prepare_inputs(image)
+    
+    # 2. Forward pass for scoring (no gradients needed)
+    self.model.eval()
+    with torch.no_grad():
+        output = self.model(inputs)
+        probabilities = F.softmax(output, dim=1)
+    
+    fake_prob = probabilities[0, 1].item()
+    
+    # 3. Generate Grad-CAM if requested
+    heatmap = None
+    if include_heatmap:
+        try:
+            heatmap = self._generate_artifact_gradcam(inputs)
+        except Exception as e:
+            print(f"⚠️ Grad-CAM heatmap generation failed: {e}")
+            # Don't raise: let inference succeed without heatmap
+            heatmap = None
+    
+    return fake_prob, heatmap
+```
+
+#### Grad-CAM Generation
+
+```python
+def _generate_artifact_gradcam(self, inputs: torch.Tensor) -> np.ndarray:
+    """
+    Generate Grad-CAM heatmap on the artifact detection branch.
+    
+    Args:
+        inputs: AIDE input tensor, shape [1, 5, 3, H, W]
+            - 4 branches for HPF+ResNet variants
+            - 1 branch for ConvNeXt semantic features
+    
+    Returns:
+        2D numpy array, shape [H', W'], values in [0, 1]
+        Higher values = regions that more strongly activate "fake" prediction
+    """
+    if not self.artifact_target_layers:
+        raise RuntimeError("Grad-CAM target layers are not configured")
+
+    # Target class: 1 = fake/AI-generated
+    targets = [ClassifierOutputTarget(1)]
+    
+    use_cuda = self.device.type == "cuda"
+    
+    # GradCAM context manager handles forward+backward pass
+    with GradCAM(
+        model=self.model,
+        target_layers=self.artifact_target_layers,
+        use_cuda=use_cuda
+    ) as cam:
+        # Compute gradients and activations
+        grayscale_cam = cam(input_tensor=inputs, targets=targets)
+        
+        # Extract first (and only) batch element
+        grayscale_cam = grayscale_cam[0, :]  # [H', W']
+    
+    return grayscale_cam
+```
+
+### C.5 Visualization Pipeline
+
+**File: `app/image_utils.py`**
+
+```python
+def create_gradcam_overlay(
+    original_image: Image.Image,
+    gradcam_heatmap: np.ndarray,
+    alpha: float = 0.5,
+    colormap: str = 'viridis'
+) -> Optional[str]:
+    """
+    Create visual overlay of Grad-CAM heatmap on original image.
+    
+    Args:
+        original_image: PIL Image (RGB)
+        gradcam_heatmap: 2D numpy array [H, W], values in [0, 1]
+        alpha: Blend factor (0.5 = 50% heatmap, 50% original)
+        colormap: Matplotlib colormap name
+    
+    Returns:
+        Base64-encoded PNG string, or None on error
+    """
+    try:
+        import matplotlib.pyplot as plt
+        from matplotlib import cm
+        
+        # 1. Convert original to float [0, 1]
+        original_array = np.array(original_image).astype(np.float32) / 255.0
+        
+        # 2. Resize heatmap to match original size
+        heatmap_resized = Image.fromarray(
+            (gradcam_heatmap * 255).astype(np.uint8)
+        )
+        heatmap_resized = heatmap_resized.resize(
+            original_image.size,
+            Image.BILINEAR
+        )
+        heatmap_array = np.array(heatmap_resized).astype(np.float32) / 255.0
+        
+        # 3. Apply colormap
+        cmap = cm.get_cmap(colormap)
+        colored_heatmap = cmap(heatmap_array)[:, :, :3]  # Drop alpha
+        
+        # 4. Alpha blend
+        overlay = alpha * colored_heatmap + (1 - alpha) * original_array
+        overlay = (overlay * 255).astype(np.uint8)
+        
+        # 5. Encode as PNG Base64
+        overlay_image = Image.fromarray(overlay)
+        buffer = io.BytesIO()
+        overlay_image.save(buffer, format='PNG')
+        
+        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+        
+    except Exception as e:
+        print(f"Grad-CAM overlay error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+```
+
+### C.6 API Integration
+
+**File: `app/main.py`**
+
+```python
+@app.post("/analyze/image", response_model=AnalyzeImageResponse)
+async def analyze_image(
+    file: UploadFile = File(...),
+    include_heatmap: bool = Form(True)  # Default: generate heatmap
+):
+    # ... validation and preprocessing ...
+    
+    # Run AIDE inference with Grad-CAM
+    fake_prob, gradcam_heatmap, inference_ms = run_inference(
+        image_array,
+        include_heatmap=include_heatmap,
+        timeout=TIMEOUT_TOTAL
+    )
+    
+    # Convert to 0-100 score
+    score = int(fake_prob * 100)
+    
+    # Create overlay visualization
+    heatmap_b64 = None
+    if include_heatmap and gradcam_heatmap is not None:
+        try:
+            heatmap_b64 = create_gradcam_overlay(
+                pil_image,
+                gradcam_heatmap,
+                alpha=GRADCAM_ALPHA,
+                colormap=GRADCAM_COLORMAP
+            )
+            if heatmap_b64 is None:
+                errors.append("HEATMAP_ERROR")
+        except Exception as e:
+            print(f"Heatmap overlay error: {e}")
+            errors.append("HEATMAP_ERROR")
+    
+    return AnalyzeImageResponse(
+        score=score,
+        model="AIDE",
+        heatmap_png_b64=heatmap_b64,  # null if disabled or failed
+        report_md=report_md,
+        inference_ms=inference_ms,
+        errors=errors
+    )
+```
+
+### C.7 Configuration
+
+**File: `app/config.py`**
+
+```python
+# Grad-CAM visualization settings
+GRADCAM_ALPHA = 0.5  # Blend: 50% heatmap, 50% original
+GRADCAM_COLORMAP = 'viridis'  # Color-blind friendly palette
+
+# Other supported colormaps:
+# - 'viridis' (default): blue-green-yellow, color-blind safe
+# - 'plasma': purple-red-yellow
+# - 'inferno': black-red-yellow
+# - 'jet': blue-cyan-yellow-red (NOT color-blind safe)
+```
+
+### C.8 Testing
+
+**Quick Structure Test (no model loading):**
+
+```bash
+cd /path/to/GAIC-Detector-Web-GUI
+conda activate gaic-detector
+python test_gradcam_simple.py
+```
+
+This verifies:
+1. ✅ Imports work
+2. ✅ Target layers configured
+3. ✅ Methods exist
+4. ✅ API integration complete
+5. ✅ Model weights present
+
+**Full Integration Test:**
+
+```bash
+# Terminal 1: Start backend
+conda activate gaic-detector
+python -m app.main
+
+# Terminal 2: Test with curl
+curl -X POST http://localhost:8000/analyze/image \
+  -F "file=@test.jpg" \
+  -F "include_heatmap=true" \
+  | jq '.heatmap_png_b64' | head -c 100
+```
+
+Expected: Base64 string starting with `iVBORw0KGgo...`
+
+### C.9 Performance Characteristics
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| **Memory overhead** | +30% | Due to gradient computation |
+| **Time overhead** | +200-500ms | Depends on image size |
+| **Heatmap resolution** | 8×8 to 16×16 | Upsampled to original size |
+| **Accuracy** | N/A | Shows model attention, not ground truth |
+
+**Optimization Tips:**
+- Disable heatmaps for batch processing: `include_heatmap=false`
+- Use smaller images (≤1024px) to reduce overhead
+- Consider caching heatmaps for repeated queries on same image
+
+### C.10 Error Handling and Degradation
+
+**Graceful Failures:**
+
+1. **Target layer not found** (initialization):
+   ```python
+   try:
+       self.artifact_target_layers = [self.model.model_min.layer4]
+   except AttributeError:
+       self.artifact_target_layers = []  # Disable heatmaps
+   ```
+
+2. **Grad-CAM generation fails** (runtime):
+   ```python
+   try:
+       heatmap = self._generate_artifact_gradcam(inputs)
+   except Exception as e:
+       print(f"⚠️ Grad-CAM failed: {e}")
+       heatmap = None  # Continue with null heatmap
+   ```
+
+3. **Overlay creation fails**:
+   ```python
+   if heatmap_b64 is None:
+       errors.append("HEATMAP_ERROR")
+   # API returns: { "heatmap_png_b64": null, "errors": ["HEATMAP_ERROR"] }
+   ```
+
+**Frontend Handling:**
+- If `heatmap_png_b64` is `null`, show placeholder:
+  > "Grad-CAM heatmap not available for this request."
+
+### C.11 Future Extensions
+
+**1. Dual Heatmap Mode (Artifact + Semantic):**
+
+```python
+# Add semantic branch target
+self.semantic_target_layers = [
+    list(self.model.openclip_convnext_xxl.stages.children())[-1]
+]
+
+def predict(...):
+    artifact_heatmap = self._generate_artifact_gradcam(inputs)
+    semantic_heatmap = self._generate_semantic_gradcam(inputs)
+    return fake_prob, {
+        "artifact": artifact_heatmap,
+        "semantic": semantic_heatmap
+    }
+```
+
+**API Response:**
+```json
+{
+  "artifact_heatmap_png_b64": "...",
+  "semantic_heatmap_png_b64": "..."
+}
+```
+
+**2. Grad-CAM++ for Better Localization:**
+
+```python
+from pytorch_grad_cam import GradCAMPlusPlus
+
+with GradCAMPlusPlus(model=self.model, ...) as cam:
+    ...
+```
+
+**3. Multi-scale Heatmaps:**
+
+Combine heatmaps from multiple layers for richer visualization.
+
+### C.12 Known Limitations
+
+1. **Resolution**: Heatmaps are upsampled from low-resolution feature maps (8×8 or 16×16)
+2. **Interpretation**: Shows where the model looks, not where manipulation actually occurred
+3. **False highlights**: May highlight salient regions even in real images
+4. **Batch processing**: Currently processes one image at a time
+
+### C.13 References
+
+- **Grad-CAM paper**: Selvaraju et al., "Grad-CAM: Visual Explanations from Deep Networks via Gradient-based Localization", ICCV 2017
+- **AIDE paper**: [Insert AIDE paper reference]
+- **pytorch-grad-cam library**: https://github.com/jacobgil/pytorch-grad-cam
 
 ---
 
