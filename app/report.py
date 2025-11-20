@@ -102,14 +102,16 @@ async def generate_gemini_report(
         import base64
         import aiohttp
 
-        # v1beta endpoint works with gemini-2.5-flash for text
+        # v1beta endpoint works with gemini-2.5-flash for text+image
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-        # Collect optional context
+        # Collect optional context including heatmap
+        heatmap_b64 = None
         inference_ms = None
         orig_size = None
 
         if extra_context:
+            heatmap_b64 = extra_context.get("heatmap_png_b64")
             inference_ms = extra_context.get("inference_ms")
             orig_size = extra_context.get("orig_size")
 
@@ -120,7 +122,7 @@ async def generate_gemini_report(
             size_str = "未提供"
         t_str = f"約 {inference_ms} ms" if inference_ms is not None else "未提供"
 
-        # Build prompt in zh-TW (text-only; image not attached to avoid MAX_TOKENS)
+        # Build prompt in zh-TW with heatmap context
         if media_type == "video" and extra_context and "frames" in extra_context:
             frames_info = extra_context["frames"]
             frames_desc = "\n".join([
@@ -142,17 +144,48 @@ async def generate_gemini_report(
                 "中度 AI 生成可能" if score <= 70 else
                 "高度 AI 生成可能"
             )
-            prompt = (
-                "用繁體中文、Markdown 簡短輸出。\n"
-                f"影像分數：{score}/100（{likelihood}），模型：{model}，解析度：{size_str}，推論時間：{t_str}\n"
-                "請輸出：\n"
-                "- 觀察(2句)：描述可疑區域位置與疑點。\n"
-                "- 限制(1句)：不確定性或品質限制。\n"
-                "- 建議(1句)：後續查核。\n"
-            )
+            # Enhanced prompt when heatmap is available
+            if heatmap_b64:
+                prompt = (
+                    "你是一位專門分析 AI 生成圖像的鑑識專家。\n\n"
+                    "這張圖片已經疊合了一層「可疑度熱力圖」：\n"
+                    "- 顏色越接近紅色或黃色，代表 AI 偵測模型覺得越可疑\n"
+                    "- 顏色接近藍色、綠色或透明，代表比較不可疑\n\n"
+                    f"影像分數：{score}/100（{likelihood}）\n"
+                    f"模型：{model}，解析度：{size_str}，推論時間：{t_str}\n\n"
+                    "請根據這張「原圖＋熱力圖」用繁體中文完成以下任務：\n\n"
+                    "1. 整體判斷（1-2句）\n"
+                    "   - 根據熱力圖分佈判斷這張圖是否可能是 AI 生成\n\n"
+                    "2. 可疑區域說明（找出 2-3 個最可疑區域）\n"
+                    "   - 依照相對位置描述（例如：左上角、右下角、畫面中央、人物臉部等）\n"
+                    "   - 說明該區域為什麼可疑（熱力圖顏色 + 視覺上的不自然之處）\n\n"
+                    "3. 總結與限制（1-2句）\n"
+                    "   - 強調這只是輔助判讀，不是 100% 確定的證據\n\n"
+                    "請用 Markdown 格式輸出，簡潔清楚即可。"
+                )
+            else:
+                # Fallback to text-only prompt
+                prompt = (
+                    "用繁體中文、Markdown 簡短輸出。\n"
+                    f"影像分數：{score}/100（{likelihood}），模型：{model}，解析度：{size_str}，推論時間：{t_str}\n"
+                    "請輸出：\n"
+                    "- 觀察(2句)：描述可疑區域位置與疑點。\n"
+                    "- 限制(1句)：不確定性或品質限制。\n"
+                    "- 建議(1句)：後續查核。\n"
+                )
 
-        # Text-only parts to keep token usage low and avoid MAX_TOKENS
-        parts = [{"text": prompt}]
+        # Build parts: include heatmap image if available
+        parts = []
+        if heatmap_b64:
+            # Add heatmap image as first part
+            parts.append({
+                "inlineData": {
+                    "mimeType": "image/png",
+                    "data": heatmap_b64
+                }
+            })
+        # Add text prompt
+        parts.append({"text": prompt})
 
         async def generate():
             # Minimal payload (no generationConfig) to avoid MAX_TOKENS oddities
