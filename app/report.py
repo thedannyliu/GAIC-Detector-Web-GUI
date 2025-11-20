@@ -155,12 +155,9 @@ async def generate_gemini_report(
         parts = [{"text": prompt}]
 
         async def generate():
+            # Minimal payload (no generationConfig) to avoid MAX_TOKENS oddities
             payload = {
-                "contents": [{"parts": parts}],
-                "generationConfig": {
-                    "temperature": 0.25,
-                    "maxOutputTokens": 320,
-                }
+                "contents": [{"parts": parts}]
             }
 
             async with aiohttp.ClientSession() as session:
@@ -170,11 +167,25 @@ async def generate_gemini_report(
                         raise Exception(f"Gemini API error {resp.status}: {error_text}")
                     
                     data = await resp.json()
-                    if "candidates" not in data or len(data["candidates"]) == 0:
-                        raise Exception("No candidates in Gemini response")
-                    
-                    text_content = data["candidates"][0]["content"]["parts"][0]["text"]
-                    return text_content
+                    candidates = data.get("candidates", [])
+                    if not candidates:
+                        raise Exception(f"No candidates in Gemini response: {data}")
+                    content = candidates[0].get("content")
+                    parts_resp = []
+                    if isinstance(content, dict):
+                        parts_resp = content.get("parts") or []
+                    elif isinstance(content, list):
+                        parts_resp = content
+                    text_chunks = []
+                    for p in parts_resp:
+                        if isinstance(p, dict) and "text" in p:
+                            text_chunks.append(p.get("text", ""))
+                        elif isinstance(p, str):
+                            text_chunks.append(p)
+                    result_text = "".join(text_chunks).strip()
+                    if not result_text:
+                        raise Exception(f"Gemini response has no text parts: {data}")
+                    return result_text
 
         result = await asyncio.wait_for(generate(), timeout=GEMINI_TIMEOUT)
         return result
@@ -217,7 +228,7 @@ async def generate_report(
     
     # Fallback to template
     if GEMINI_ENABLED:
-        error = "REPORT_GEN_TIMEOUT" if GEMINI_API_KEY else "REPORT_GEN_ERROR"
+        error = "REPORT_GEN_ERROR"
     
     template_report = generate_template_report(score, model, media_type)
     return template_report, error

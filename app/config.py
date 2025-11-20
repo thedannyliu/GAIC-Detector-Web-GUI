@@ -24,7 +24,7 @@ SUPPORTED_IMAGE_FORMATS = ["jpg", "jpeg", "png", "webp"]
 
 # Image processing
 MAX_LONG_SIDE = 1536
-AIDE_INPUT_SIZE = 224  # ResNet-50 input size
+AIDE_INPUT_SIZE = 256  # AIDE model requires 256x256 for ConvNeXt (model-side fixed)
 
 # ============================================
 # VIDEO SETTINGS
