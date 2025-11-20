@@ -15,14 +15,11 @@ from pathlib import Path
 import time
 from typing import Tuple, Optional
 import numpy as np
-import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 from PIL import Image
-from pytorch_grad_cam import GradCAM
-from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 # Add aide_original to path
 AIDE_DIR = Path(__file__).parent / "aide_original"
@@ -261,7 +258,8 @@ class AIDeInferenceWrapper:
     
     def _generate_artifact_gradcam(self, inputs: torch.Tensor) -> np.ndarray:
         """
-        Generate a Grad-CAM heatmap on the low-level artifact branch (HPF + ResNet).
+        Generate a Grad-CAM heatmap on the low-level artifact branch (HPF + ResNet)
+        using a manual Grad-CAM implementation to avoid shape issues with 5D inputs.
         
         Args:
             inputs: AIDE input tensor of shape [1, 5, 3, H, W]
@@ -272,20 +270,65 @@ class AIDeInferenceWrapper:
         if not self.artifact_target_layers:
             raise RuntimeError("Grad-CAM target layers are not configured.")
 
-        targets = [ClassifierOutputTarget(1)]  # class index 1 = fake / AI-generated
+        # Target layer we hook into
+        target_layer = self.model.model_min.layer4
 
-        # GradCAM will internally run a forward + backward pass with gradients enabled.
-        # Note: In newer pytorch-grad-cam versions, use_cuda parameter is removed.
-        # The device is automatically detected from the model.
-        with GradCAM(
-            model=self.model,
-            target_layers=self.artifact_target_layers
-        ) as cam:
-            grayscale_cam = cam(input_tensor=inputs, targets=targets)
-            # Batch size is 1 → take the first CAM
-            grayscale_cam = grayscale_cam[0, :]
+        activations: dict = {}
+        gradients: dict = {}
 
-        return grayscale_cam
+        def forward_hook(module, inp, out):
+            activations["value"] = out
+
+        def backward_hook(module, grad_in, grad_out):
+            gradients["value"] = grad_out[0]
+
+        handle_fwd = target_layer.register_forward_hook(forward_hook)
+        handle_bwd = target_layer.register_full_backward_hook(backward_hook)
+
+        try:
+            # Forward with gradients enabled (do NOT wrap with no_grad)
+            self.model.zero_grad(set_to_none=True)
+            outputs = self.model(inputs)  # [1, 2]
+
+            # Target class 1 (fake)
+            score = outputs[:, 1].sum()
+            score.backward()
+
+            if "value" not in activations or "value" not in gradients:
+                raise RuntimeError("Grad-CAM hooks did not capture activations/gradients.")
+
+            acts = activations["value"]   # [B, C, H, W]
+            grads = gradients["value"]    # [B, C, H, W]
+
+            # Weight each channel by the average gradient
+            weights = grads.mean(dim=(2, 3), keepdim=True)  # [B, C, 1, 1]
+            cam = (weights * acts).sum(dim=1, keepdim=True)  # [B, 1, H, W]
+            cam = F.relu(cam)
+
+            # Upsample CAM to the spatial size of the model input branch (H, W)
+            target_h, target_w = inputs.shape[-2], inputs.shape[-1]
+            cam = F.interpolate(
+                cam,
+                size=(target_h, target_w),
+                mode="bilinear",
+                align_corners=False
+            )
+
+            cam = cam[0, 0]  # [H, W]
+            cam = cam.detach().cpu().numpy()
+
+            # Normalize to 0-1
+            cam_min, cam_max = cam.min(), cam.max()
+            if cam_max > cam_min:
+                cam = (cam - cam_min) / (cam_max - cam_min)
+            else:
+                cam = np.zeros_like(cam)
+
+            return cam
+
+        finally:
+            handle_fwd.remove()
+            handle_bwd.remove()
 
 
 # Global model instance (lazy loading)

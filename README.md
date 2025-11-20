@@ -1,12 +1,27 @@
-# GAIC Detector Web GUI - AIDE Edition# GAIC Detector Web GUI
+# GAIC Detector Web GUI - AIDE Edition
 
+AI-Generated Image/Video Detection System with AIDE model, Grad-CAM explanations, and Gemini-powered reports.
 
+🎉 **NEW: Official AIDE Model Integration** (ICLR 2025)
 
-AI-Generated Image/Video Detection System with AIDE model, Grad-CAM explanations, and Gemini-powered reports.**AI-Generated Image Detection System for Taiwan FactCheck Center**
+## 🚀 Quick Start (Phoenix GPU Server)
 
+### One-Command Launch:
 
+```bash
+cd /storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/GAIC-Detector-Web-GUI
+./run_local.sh
+```
 
-🎉 **NEW: Official AIDE Model Integration** (ICLR 2025)A complete web-based demo application for detecting AI-generated images using multiple detection models. Features a FastAPI backend and Gradio frontend with real-time analysis, heatmap visualization, and detailed reporting.
+Then on **your local computer**:
+
+```bash
+ssh -N -L 7860:localhost:7860 -L 8000:localhost:8000 eliu354@login-phoenix-slurm.pace.gatech.edu
+```
+
+Open browser: **http://localhost:7860**
+
+**📖 Full Guide**: See [START_HERE.md](START_HERE.md) or [QUICK_START.md](QUICK_START.md)
 
 
 

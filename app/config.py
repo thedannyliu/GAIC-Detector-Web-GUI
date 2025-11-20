@@ -18,33 +18,33 @@ TEST_SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
 # IMAGE SETTINGS
 # ============================================
 # API settings for images
-MAX_IMAGE_SIZE_MB = 10
+MAX_IMAGE_SIZE_MB = 30  # 3x original limit
 MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
 SUPPORTED_IMAGE_FORMATS = ["jpg", "jpeg", "png", "webp"]
 
 # Image processing
-MAX_LONG_SIDE = 1536
-AIDE_INPUT_SIZE = 224  # ResNet-50 input size
+MAX_LONG_SIDE = 1536 * 3  # allow larger previews while preserving aspect
+AIDE_INPUT_SIZE = 256  # AIDE model requires 256x256 for ConvNeXt (model-side fixed)
 
 # ============================================
 # VIDEO SETTINGS
 # ============================================
 # API settings for videos
-MAX_VIDEO_SIZE_MB = 50
+MAX_VIDEO_SIZE_MB = 150  # 3x original limit
 MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
 SUPPORTED_VIDEO_FORMATS = ["mp4", "mov", "webm"]
 
 # Video processing
 VIDEO_SAMPLE_FRAMES = 16  # Number of frames to sample from video
-VIDEO_MAX_DURATION = 300  # Maximum video duration in seconds (5 min)
+VIDEO_MAX_DURATION = 900  # 3x duration budget (seconds)
 
 # ============================================
 # TIMEOUT SETTINGS (seconds)
 # ============================================
-TIMEOUT_TOTAL = 120  # 增加到 2 分鐘
-TIMEOUT_DEGRADE = 90
-TIMEOUT_SKIP_HEATMAP = 100
-TIMEOUT_LLM = 30  # Gemini 超時增加到 30 秒
+TIMEOUT_TOTAL = 120  # 3x
+TIMEOUT_DEGRADE = 75
+TIMEOUT_SKIP_HEATMAP = 105
+TIMEOUT_LLM = 6
 
 # ============================================
 # MODEL SETTINGS - AIDE ONLY
@@ -65,10 +65,11 @@ GRADCAM_TARGET_LAYER = "layer4"  # ResNet-50 last conv block
 GEMINI_ENABLED = True
 GEMINI_API_KEY = os.getenv(
     "GEMINI_API_KEY", 
-    "AIzaSyDcpP36XpRgiA7qM-82yLn0SAqyxrEn4aM"  # Default free-tier key
+    "AIzaSyDcpP36XpRgiA7qM-82yLn0SAqyxrEn4aM"  # Free-tier API key
 )
-GEMINI_MODEL = "gemini-1.5-flash-latest"  # 使用 -latest 版本
-GEMINI_TIMEOUT = TIMEOUT_LLM
+# Gemini model name (multimodal, v1beta)
+GEMINI_MODEL = "gemini-1.5-flash-latest"  # Use latest stable version
+GEMINI_TIMEOUT = 30  # Allow time for Gemini processing
 
 # ============================================
 # SERVER SETTINGS

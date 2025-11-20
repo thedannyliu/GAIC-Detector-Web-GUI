@@ -504,7 +504,7 @@ with gr.Blocks(css=custom_css, title="GAIC Detector - AIDE Edition") as demo:
             with gr.Row():
                 with gr.Column(scale=1):
                     image_input = gr.Image(
-                        label="Upload Image (≤10MB)",
+                        label="Upload Image (≤30MB)",
                         type="numpy",
                         sources=["upload", "clipboard", "webcam"],
                         height=380
@@ -556,7 +556,7 @@ with gr.Blocks(css=custom_css, title="GAIC Detector - AIDE Edition") as demo:
             with gr.Row():
                 with gr.Column(scale=1):
                     video_input = gr.Video(
-                        label="Upload Video (≤50MB, MP4/MOV/WEBM)",
+                        label="Upload Video (≤150MB, MP4/MOV/WEBM)",
                         height=380
                     )
                     analyze_btn_vid = gr.Button("🔍 Analyze Video", variant="primary", size="lg")
@@ -662,6 +662,7 @@ with gr.Blocks(css=custom_css, title="GAIC Detector - AIDE Edition") as demo:
 
 if __name__ == "__main__":
     # Check if we should enable sharing (for cluster environments)
+    # Default to false for local SSH tunnel access
     enable_share = os.getenv("GRADIO_SHARE", "false").lower() == "true"
     
     print("="*60)
@@ -669,6 +670,7 @@ if __name__ == "__main__":
     print("="*60)
     print(f"Backend API: {API_URL}")
     print(f"Share mode: {enable_share}")
+    print(f"Server mode: {'Public Share' if enable_share else 'Local Access (SSH Tunnel)'}")
     print("Features:")
     print("  - Image analysis with AIDE + Grad-CAM")
     print("  - Video analysis with frame sampling")
@@ -679,5 +681,6 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        share=enable_share
+        share=enable_share,
+        show_error=True
     )

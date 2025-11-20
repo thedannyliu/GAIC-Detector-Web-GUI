@@ -66,3 +66,25 @@ htmlcov/
 gradio_cached_examples/
 flagged/
 backend.pid
+frontend.pid
+
+# Temporary fix/test scripts
+*_fix.py
+*_old.py
+test_fixes.py
+test_share.sh
+
+# Duplicate/redundant documentation
+BUG_FIXES_SUMMARY.md
+FINAL_FIX.md
+WORKING_VERSION.md
+SSH_TUNNEL_FIX.md
+QUICK_START.md
+
+# Redundant startup scripts (keep start_local.sh and start_services.sh)
+launch.sh
+run.sh
+run_local.sh
+stop.sh
+quick_start.sh
+quick_start_fixed.sh

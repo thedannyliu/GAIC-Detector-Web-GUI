@@ -159,11 +159,16 @@ async def analyze_image(
                 print(f"Heatmap overlay error: {e}")
                 errors.append(ErrorCode.HEATMAP_ERROR)
         
-        # Generate report with Gemini
+        # Generate report with Gemini (pass heatmap + context)
         report_md, report_error = await generate_report(
             score,
             MODEL_NAME,
-            media_type="image"
+            media_type="image",
+            extra_context={
+                "heatmap_png_b64": heatmap_b64,
+                "orig_size": pil_image.size,
+                "inference_ms": inference_ms,
+            }
         )
         if report_error:
             errors.append(report_error)
@@ -288,6 +293,10 @@ async def analyze_video(
                 print(f"Heatmap overlay error: {e}")
                 errors.append(ErrorCode.HEATMAP_ERROR)
         
+        # Calculate total inference time so far
+        elapsed = time.time() - start_time
+        inference_ms = int(elapsed * 1000)
+
         # Prepare context for Gemini report (top 3 frames)
         top_frames_context = {
             "num_frames": len(frames),
@@ -297,7 +306,10 @@ async def analyze_video(
                     "score": fr["score"]
                 }
                 for fr in frame_results[:3]
-            ]
+            ],
+            "heatmap_png_b64": heatmap_b64,
+            "orig_size": key_frame_pil.size,
+            "inference_ms": inference_ms,
         }
         
         # Generate report with Gemini
@@ -309,10 +321,6 @@ async def analyze_video(
         )
         if report_error:
             errors.append(report_error)
-        
-        # Calculate total inference time
-        elapsed = time.time() - start_time
-        inference_ms = int(elapsed * 1000)
         
         # Check total time
         if elapsed > TIMEOUT_TOTAL:
