@@ -99,62 +99,83 @@ async def generate_gemini_report(
         return None
     
     try:
-        # Import here to avoid dependency issues
-        import google.generativeai as genai
-        
-        # Configure Gemini
-        genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel(GEMINI_MODEL)
-        
-        # Build prompt based on media type
+        import base64
+        import aiohttp
+
+        # v1beta endpoint works with gemini-2.5-flash for text
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+
+        # Collect optional context
+        inference_ms = None
+        orig_size = None
+
+        if extra_context:
+            inference_ms = extra_context.get("inference_ms")
+            orig_size = extra_context.get("orig_size")
+
+        # Human-friendly strings
+        if isinstance(orig_size, (list, tuple)) and len(orig_size) == 2:
+            size_str = f"{orig_size[0]}x{orig_size[1]}"
+        else:
+            size_str = "未提供"
+        t_str = f"約 {inference_ms} ms" if inference_ms is not None else "未提供"
+
+        # Build prompt in zh-TW (text-only; image not attached to avoid MAX_TOKENS)
         if media_type == "video" and extra_context and "frames" in extra_context:
-            # Video analysis prompt
             frames_info = extra_context["frames"]
             frames_desc = "\n".join([
-                f"- Frame at {f['timestamp']:.1f}s: score {f['score']}/100"
-                for f in frames_info[:3]  # Top 3 frames
+                f"- 影格 {idx+1} @ {f['timestamp']:.1f}s：分數 {f['score']}/100"
+                for idx, f in enumerate(frames_info[:3])
             ])
-            
-            prompt = f"""You are an AI forensics assistant helping fact-checkers.
-
-An AI-generated content detector ({model}) analyzed {extra_context.get('num_frames', 16)} frames from this video.
-
-Most suspicious frames:
-{frames_desc}
-
-Video-level score: {score}/100 (highest frame score)
-
-Write a concise video-level explanation (3-4 sentences) in English that:
-1. Summarizes the AI-generation likelihood
-2. Mentions temporal patterns if any
-3. States limitations and uncertainty
-4. Avoids definitive claims
-
-Format: Markdown"""
+            prompt = (
+                "用繁體中文、Markdown 簡短輸出。\n"
+                f"影片分數：{score}/100，模型：{model}，解析度：{size_str}，推論時間：{t_str}\n"
+                f"可疑影格摘要：\n{frames_desc}\n"
+                "請輸出：\n"
+                "- 觀察(2句)：描述可疑區域位置與疑點。\n"
+                "- 限制(1句)：不確定性。\n"
+                "- 建議(1句)：後續查核。\n"
+            )
         else:
-            # Image analysis prompt
-            prompt = f"""You are an AI forensics assistant helping fact-checkers.
+            likelihood = (
+                "低度 AI 生成可能" if score <= 30 else
+                "中度 AI 生成可能" if score <= 70 else
+                "高度 AI 生成可能"
+            )
+            prompt = (
+                "用繁體中文、Markdown 簡短輸出。\n"
+                f"影像分數：{score}/100（{likelihood}），模型：{model}，解析度：{size_str}，推論時間：{t_str}\n"
+                "請輸出：\n"
+                "- 觀察(2句)：描述可疑區域位置與疑點。\n"
+                "- 限制(1句)：不確定性或品質限制。\n"
+                "- 建議(1句)：後續查核。\n"
+            )
 
-An AI-generated image detector ({model}) analyzed this image and produced a score of {score}/100.
+        # Text-only parts to keep token usage low and avoid MAX_TOKENS
+        parts = [{"text": prompt}]
 
-Score interpretation:
-- 0-30: Low likelihood
-- 30-70: Medium likelihood  
-- 70-100: High likelihood
-
-Write a concise explanation (3-4 sentences) in English that:
-1. Explains what the score indicates
-2. Mentions key suspicious patterns (if score is high)
-3. States limitations and uncertainty
-4. Avoids claiming the image is definitively fake or real
-
-Format: Markdown"""
-        
-        # Generate with timeout
         async def generate():
-            response = await gemini_model.generate_content_async(prompt)
-            return response.text
-        
+            payload = {
+                "contents": [{"parts": parts}],
+                "generationConfig": {
+                    "temperature": 0.25,
+                    "maxOutputTokens": 320,
+                }
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMINI_TIMEOUT)) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        raise Exception(f"Gemini API error {resp.status}: {error_text}")
+                    
+                    data = await resp.json()
+                    if "candidates" not in data or len(data["candidates"]) == 0:
+                        raise Exception("No candidates in Gemini response")
+                    
+                    text_content = data["candidates"][0]["content"]["parts"][0]["text"]
+                    return text_content
+
         result = await asyncio.wait_for(generate(), timeout=GEMINI_TIMEOUT)
         return result
         

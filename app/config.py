@@ -41,10 +41,10 @@ VIDEO_MAX_DURATION = 300  # Maximum video duration in seconds (5 min)
 # ============================================
 # TIMEOUT SETTINGS (seconds)
 # ============================================
-TIMEOUT_TOTAL = 120  # 增加到 2 分鐘
+TIMEOUT_TOTAL = 120  # Total timeout for inference
 TIMEOUT_DEGRADE = 90
 TIMEOUT_SKIP_HEATMAP = 100
-TIMEOUT_LLM = 30  # Gemini 超時增加到 30 秒
+TIMEOUT_LLM = 60  # Gemini timeout increased to 60 seconds
 
 # ============================================
 # MODEL SETTINGS - AIDE ONLY
@@ -67,8 +67,8 @@ GEMINI_API_KEY = os.getenv(
     "GEMINI_API_KEY", 
     "AIzaSyDcpP36XpRgiA7qM-82yLn0SAqyxrEn4aM"  # Default free-tier key
 )
-GEMINI_MODEL = "gemini-1.5-flash-latest"  # 使用 -latest 版本
-GEMINI_TIMEOUT = TIMEOUT_LLM
+GEMINI_MODEL = "gemini-2.5-flash"  # Use Gemini 2.5 Flash
+GEMINI_TIMEOUT = 60  # 60 seconds timeout for Gemini
 
 # ============================================
 # SERVER SETTINGS
