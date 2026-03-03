@@ -63,10 +63,7 @@ GRADCAM_TARGET_LAYER = "layer4"  # ResNet-50 last conv block
 # GEMINI API SETTINGS
 # ============================================
 GEMINI_ENABLED = True
-GEMINI_API_KEY = os.getenv(
-    "GEMINI_API_KEY", 
-    "AIzaSyDcpP36XpRgiA7qM-82yLn0SAqyxrEn4aM"  # Default free-tier key
-)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")  # Set in .env
 GEMINI_MODEL = "gemini-2.5-flash"  # Use Gemini 2.5 Flash
 GEMINI_TIMEOUT = 60  # 60 seconds timeout for Gemini
 

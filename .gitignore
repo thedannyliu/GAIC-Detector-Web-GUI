@@ -5,27 +5,14 @@ __pycache__/
 *.so
 .Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
 
 # Virtual Environment
 venv/
 env/
 ENV/
-env.bak/
-venv.bak/
 
 # IDE
 .vscode/
@@ -35,56 +22,32 @@ venv.bak/
 *~
 .DS_Store
 
-# Environment variables
+# Environment variables (with real secrets)
 .env
 
-# Model weights (large files)
+# Model weights (large binary files – download separately)
 models/weights/*.pth
 models/weights/*.pt
 models/weights/*.ckpt
 models/weights/*.bin
 
-# Temporary files
+# Temporary / runtime files
 temp/
 tmp/
 *.tmp
-
-# Logs
 *.log
-logs/
+*.pid
+gaic_slurm_*.log
 
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
 
-# Testing
+# Testing caches
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Gradio cache
+# Gradio
 gradio_cached_examples/
 flagged/
-backend.pid
-frontend.pid
-
-# Temporary fix/test scripts
-*_fix.py
-*_old.py
-test_fixes.py
-test_share.sh
-
-# Duplicate/redundant documentation
-BUG_FIXES_SUMMARY.md
-FINAL_FIX.md
-WORKING_VERSION.md
-SSH_TUNNEL_FIX.md
-QUICK_START.md
-
-# Redundant startup scripts (keep start_local.sh and start_services.sh)
-launch.sh
-run.sh
-run_local.sh
-stop.sh
-quick_start.sh
-quick_start_fixed.sh
