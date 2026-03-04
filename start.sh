@@ -11,6 +11,9 @@
 
 set -e
 
+# Ensure logs directory exists
+mkdir -p logs
+
 # ── Colour helpers ─────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -45,6 +48,23 @@ EOF
     [ $? -eq 0 ] && success "PyTorch check passed." || { err "PyTorch check failed. See https://pytorch.org for installation."; exit 1; }
 }
 
+# ── Auto-cleanup old processes ─────────────────────────────────
+auto_cleanup() {
+    # Kill any leftover backend/frontend processes from previous runs
+    if pgrep -f "uvicorn app.main:app" > /dev/null 2>&1; then
+        warn "Found stale backend process – killing it."
+        pkill -f "uvicorn app.main:app" 2>/dev/null || true
+        sleep 1
+    fi
+    if pgrep -f "gradio_app.py" > /dev/null 2>&1; then
+        warn "Found stale frontend process – killing it."
+        pkill -f "gradio_app.py" 2>/dev/null || true
+        sleep 1
+    fi
+    # Clean up stale PID files
+    rm -f logs/backend.pid logs/frontend.pid
+}
+
 # ── Start backend ──────────────────────────────────────────────
 start_backend() {
     info "Starting FastAPI backend (port 8000)..."
@@ -54,18 +74,18 @@ start_backend() {
         --host 0.0.0.0 \
         --port 8000 \
         --timeout-keep-alive 120 \
-        > backend.log 2>&1 &
+        > logs/backend.log 2>&1 &
 
     BACKEND_PID=$!
-    echo "$BACKEND_PID" > backend.pid
-    success "Backend started (PID $BACKEND_PID). Logs: backend.log"
+    echo "$BACKEND_PID" > logs/backend.pid
+    success "Backend started (PID $BACKEND_PID). Logs: logs/backend.log"
 
     # Wait for backend to become ready (model loading takes time)
     info "Waiting for backend to become ready (model is ~3.6 GB, may take 30–60 s)..."
     for i in $(seq 1 60); do
-        kill -0 "$BACKEND_PID" 2>/dev/null || { err "Backend process died. Check backend.log."; exit 1; }
+        kill -0 "$BACKEND_PID" 2>/dev/null || { err "Backend process died. Check logs/backend.log."; exit 1; }
         curl -sf --max-time 2 http://localhost:8000/ >/dev/null 2>&1 && { success "Backend ready (${i}s)."; break; }
-        [ "$i" -eq 60 ] && { err "Backend did not start in 60 s. Check backend.log."; exit 1; }
+        [ "$i" -eq 60 ] && { err "Backend did not start in 60 s. Check logs/backend.log."; exit 1; }
         printf .
         sleep 1
     done
@@ -76,25 +96,20 @@ start_backend() {
 start_frontend() {
     info "Starting Gradio frontend (port 7860)..."
 
-    # Detect cluster environment → enable Gradio public share link
-    if [ -n "$SLURM_JOB_ID" ] || [ -n "$PBS_JOBID" ]; then
-        info "Cluster environment detected – enabling Gradio share link."
-        export GRADIO_SHARE=true
-    else
-        export GRADIO_SHARE=false
-    fi
+    # Enable Gradio public share link unconditionally
+    info "Enabling Gradio share link for direct web access."
+    export GRADIO_SHARE=true
 
-    export GRADIO_SERVER_PORT=7860
-    nohup python gradio_app.py > frontend.log 2>&1 &
+    nohup python -u gradio_app.py > logs/frontend.log 2>&1 &
     FRONTEND_PID=$!
-    echo "$FRONTEND_PID" > frontend.pid
-    success "Frontend started (PID $FRONTEND_PID). Logs: frontend.log"
+    echo "$FRONTEND_PID" > logs/frontend.pid
+    success "Frontend started (PID $FRONTEND_PID). Logs: logs/frontend.log"
 
-    # Wait for frontend
+    # Wait for frontend by checking logs for the start message
     for i in $(seq 1 30); do
-        kill -0 "$FRONTEND_PID" 2>/dev/null || { err "Frontend process died. Check frontend.log."; exit 1; }
-        curl -sf --max-time 2 http://localhost:7860/ >/dev/null 2>&1 && { success "Frontend ready (${i}s)."; break; }
-        [ "$i" -eq 30 ] && { err "Frontend did not start in 30 s. Check frontend.log."; exit 1; }
+        kill -0 "$FRONTEND_PID" 2>/dev/null || { err "Frontend process died. Check logs/frontend.log."; exit 1; }
+        grep -q "Running on" logs/frontend.log && { success "Frontend ready (${i}s)."; break; }
+        [ "$i" -eq 30 ] && { err "Frontend did not start in 30 s. Check logs/frontend.log."; exit 1; }
         printf .
         sleep 1
     done
@@ -104,7 +119,7 @@ start_frontend() {
 # ── Stop services ──────────────────────────────────────────────
 stop_services() {
     info "Stopping services..."
-    for pidf in backend.pid frontend.pid; do
+    for pidf in logs/backend.pid logs/frontend.pid; do
         if [ -f "$pidf" ]; then
             pid=$(cat "$pidf")
             kill "$pid" 2>/dev/null && success "Stopped PID $pid." || true
@@ -119,7 +134,6 @@ stop_services() {
 # ── Print access instructions ──────────────────────────────────
 print_access_info() {
     HOSTNAME=$(hostname)
-    USERNAME=$(whoami)
     echo ""
     echo "════════════════════════════════════════════════════════════"
     success "GAIC Detector is running!"
@@ -127,20 +141,18 @@ print_access_info() {
     echo ""
     echo "  Compute node : $HOSTNAME"
     echo "  Backend API  : http://localhost:8000  (docs: /docs)"
-    echo "  Frontend UI  : http://localhost:7860"
+    echo "  Frontend UI  : Check logs for dynamic port (typically http://localhost:7860+)"
     echo ""
-    echo "── SSH Tunnel (run this on your LOCAL machine) ─────────────"
+    echo "── Public Web Access ───────────────────────────────────────"
     echo ""
-    echo "  ssh -N \\"
-    echo "    -L 7860:localhost:7860 \\"
-    echo "    -L 8000:localhost:8000 \\"
-    echo "    -J ${USERNAME}@login-phoenix.pace.gatech.edu \\"
-    echo "    ${USERNAME}@${HOSTNAME}"
+    echo "  A public Gradio link is being generated. Look for the "
+    echo "  'Running on public URL' line in your logs."
     echo ""
-    echo "  Then open: http://localhost:7860"
+    echo "  To see the generated URL, run:"
+    echo "    cat logs/frontend.log | grep -i 'public URL'"
     echo ""
     echo "── Management ────────────────────────────────────────────"
-    echo "  Logs        : tail -f backend.log | tail -f frontend.log"
+    echo "  Logs        : tail -f logs/backend.log | tail -f logs/frontend.log"
     echo "  Stop        : ./start.sh stop"
     echo "════════════════════════════════════════════════════════════"
 }
@@ -157,15 +169,18 @@ main() {
     case "$MODE" in
         backend)
             check_gpu && check_pytorch_cuda || true
+            auto_cleanup
             start_backend
             ;;
         frontend)
+            auto_cleanup
             start_frontend
             print_access_info
             ;;
         all)
             check_gpu && check_pytorch_cuda || true
             echo ""
+            auto_cleanup
             start_backend
             start_frontend
             print_access_info

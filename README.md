@@ -137,24 +137,21 @@ bash start.sh
 sbatch submit_job.sh
 ```
 
-`submit_job.sh` requests GPU resources and automatically starts all services. Check `gaic_slurm_<jobid>.log` for the SSH tunnel command.
+`submit_job.sh` requests GPU resources and automatically starts all services. Check `logs/gaic_slurm_<jobid>.log` for the initial output.
 
-### Accessing the UI via SSH tunnel
+### Accessing the UI via Public Web Link
 
-Once the services are running on the compute node, forward ports to your **local machine**:
+Once the services are running on the compute node, Gradio will generate a **public share URL** (e.g., `https://<random-string>.gradio.live`). You can access this URL directly from any device without setting up an SSH tunnel.
 
+To find your unique URL:
+1. Wait a few seconds for the services to launch.
+2. Check the frontend log file:
 ```bash
-# Run this on YOUR LOCAL machine (replace USERNAME and COMPUTE-NODE):
-ssh -N \
-  -L 7860:localhost:7860 \
-  -L 8000:localhost:8000 \
-  -J USERNAME@login-phoenix.pace.gatech.edu \
-  USERNAME@COMPUTE-NODE
+cat logs/frontend.log | grep -i "public URL"
 ```
+3. Open the printed link in your browser.
 
-Then open **<http://localhost:7860>** in your browser.
-
-> **Tip**: `start.sh` prints the exact SSH command (with your actual username and node hostname) after the services are up.
+> **Tip**: `start.sh` will output the exact command needed to check the logs after the services are up.
 
 ---
 
@@ -236,7 +233,7 @@ Key constants live in `app/config.py`. The most commonly changed settings can be
 | `API_HOST` | `0.0.0.0` | Backend bind address |
 | `API_PORT` | `8000` | Backend port |
 | `GAIC_BACKEND_URL` | `http://localhost:8000` | Frontend → backend URL |
-| `GRADIO_SHARE` | `false` | Enable Gradio public share link |
+| `GRADIO_SHARE` | `true` | Enable Gradio public share link |
 
 ---
 

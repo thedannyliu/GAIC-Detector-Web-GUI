@@ -25,8 +25,8 @@
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --time=4:00:00
-#SBATCH --output=gaic_slurm_%j.log
-#SBATCH --error=gaic_slurm_%j.log
+#SBATCH --output=logs/gaic_slurm_%j.log
+#SBATCH --error=logs/gaic_slurm_%j.log
 # Adjust --partition and --account as needed for your cluster allocation
 # #SBATCH --partition=gpu
 # #SBATCH --account=<your-account>
@@ -67,23 +67,16 @@ fi
 # Start all services
 bash "$SCRIPT_DIR/start.sh" all
 
-# Print SSH tunnel instructions (useful for users who don't see the Gradio share link)
-HOSTNAME=$(hostname)
-USERNAME=$(whoami)
+# Print Web Access instructions
 echo ""
 echo "================================================================"
-echo "  Access from your LOCAL machine"
+echo "  Accessing the Web GUI"
 echo "================================================================"
 echo ""
-echo "  Run this in a new terminal on your local machine:"
+echo "  The Gradio frontend is starting. A public share link will be generated."
+echo "  Check the output in logs/frontend.log for the 'Public URL'."
 echo ""
-echo "    ssh -N \\"
-echo "      -L 7860:localhost:7860 \\"
-echo "      -L 8000:localhost:8000 \\"
-echo "      -J ${USERNAME}@login-phoenix.pace.gatech.edu \\"
-echo "      ${USERNAME}@${HOSTNAME}"
-echo ""
-echo "  Then open: http://localhost:7860"
+echo "    cat logs/frontend.log"
 echo ""
 echo "================================================================"
 

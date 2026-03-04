@@ -38,6 +38,7 @@ tmp/
 *.log
 *.pid
 gaic_slurm_*.log
+logs/
 
 # Jupyter
 .ipynb_checkpoints/
