@@ -1,134 +1,66 @@
 # Models Directory
 
-This directory contains the model weights for the AI detection models.
+This folder stores local model artifacts required by the GAIC Detector runtime.
 
-## Structure
+## Current Expected Structure
 
-```
+```text
 models/
-├── weights/          # Model checkpoint files
-│   ├── susy.pth
-│   ├── fatformer.pth
-│   └── distildire.pth
-└── README.md        # This file
+├── weights/
+│   └── GenImage_train.pth
+└── README.md
 ```
 
-## Getting Model Weights
+## Active Model
 
-### Option 1: Download Pre-trained Models
+The current backend implementation is **AIDE-only**.
 
-**Note**: Replace these URLs with actual model sources when available.
+- API model identifier: `AIDE`
+- Required checkpoint: `models/weights/GenImage_train.pth`
+
+## Downloading Weights
+
+Run:
 
 ```bash
-# SuSy Model
-wget -O weights/susy.pth https://example.com/susy_weights.pth
-
-# FatFormer Model
-wget -O weights/fatformer.pth https://example.com/fatformer_weights.pth
-
-# DistilDIRE Model
-wget -O weights/distildire.pth https://example.com/distildire_weights.pth
+bash download_aide_weights.sh
 ```
 
-### Option 2: Research Papers & Official Implementations
+Manual source:
 
-1. **SuSy (Supervised Synthesis Detection)**
-   - Search for official implementation and pre-trained weights
-   - Paper: [Include reference if available]
-   - GitHub: [Include link if available]
+- <https://drive.google.com/file/d/1ZJCJmzyIrbSOROS7bKTgSm-Fe6yHsVXz/view>
 
-2. **FatFormer (Forensic Analysis Transformer)**
-   - Check official repository for model weights
-   - Paper: [Include reference if available]
-   - GitHub: [Include link if available]
+## Validation
 
-3. **DistilDIRE (Distilled Detection)**
-   - Look for official releases
-   - Paper: [Include reference if available]
-   - GitHub: [Include link if available]
+Check file existence and size:
 
-### Option 3: Demo Mode (No Weights Needed)
-
-The system includes **mock detectors** that work without actual model weights. These generate realistic-looking results based on image statistics and are suitable for:
-- Testing the UI/UX
-- Demonstrating the system flow
-- Development and integration testing
-
-**Note**: Mock detectors are automatically used when weight files are not found.
-
-## Model Information
-
-### SuSy
-- **Type**: Patch-based detector
-- **Input**: 224×224 patches with stride
-- **Output**: Score + spatial heatmap
-- **Use Case**: General AI-image detection
-
-### FatFormer
-- **Type**: Transformer-based full-image detector
-- **Input**: Full image (resized)
-- **Output**: Single score
-- **Use Case**: Fast full-image analysis
-
-### DistilDIRE
-- **Type**: Distilled detection model
-- **Input**: Full image
-- **Output**: Single score
-- **Use Case**: Lightweight deployment
-
-## File Format
-
-Models should be saved as PyTorch checkpoint files (`.pth` or `.pt`) containing:
-- Model state dict
-- Architecture configuration (if needed)
-- Any preprocessing parameters
-
-## Custom Models
-
-To add your own model:
-
-1. Create a detector class in `app/models.py`:
-```python
-class CustomDetector(BaseDetector):
-    def __init__(self, model_path: Path):
-        super().__init__(model_path)
-        # Load your model
-    
-    def predict(self, image, stride):
-        # Implement prediction
-        return score, heatmap
+```bash
+ls -lh models/weights/GenImage_train.pth
 ```
 
-2. Register the model:
-```python
-registry.register_model("CustomModel", CustomDetector)
-```
+## Operational Notes
 
-3. Add to `AVAILABLE_MODELS` in `app/config.py`
-
-4. Place weights file: `models/weights/custommodl.pth`
-
-## Storage Considerations
-
-⚠️ **Large Files**: Model weights are typically large (100MB - 2GB). 
-- Excluded from git by default (see `.gitignore`)
-- Consider using Git LFS for version control
-- Use model hosting services (Hugging Face, AWS S3) for distribution
+- Do not commit weight binaries to git.
+- Keep this directory writable by the runtime user.
+- On shared systems, verify free disk space before downloading.
 
 ## Troubleshooting
 
-**Model not loading?**
-- Check file exists: `ls -lh models/weights/`
-- Verify file permissions
-- Check logs for loading errors
-- System will fallback to mock detector if weights missing
+### Missing model file
 
-**Out of memory?**
-- Reduce input image size
-- Use CPU instead of GPU
-- Consider model quantization
+Symptoms:
 
-**Slow inference?**
-- Enable GPU if available
-- Reduce stride (increases speed, decreases accuracy)
-- Use degraded mode (automatic at 25s timeout)
+- backend inference fails
+- startup/inference logs mention missing checkpoint path
+
+Fix:
+
+1. Re-run `bash download_aide_weights.sh`
+2. Confirm path and permissions
+3. Restart backend process
+
+### Slow first inference
+
+Expected behavior for large checkpoints.
+Warm-up requests or preloading model on service start can reduce first-request latency.
+

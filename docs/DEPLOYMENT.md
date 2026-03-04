@@ -1,243 +1,187 @@
-# GAIC Detector - Quick Deployment Guide
+# GAIC Detector Deployment Guide
 
-## Prerequisites
+This document describes deployment for the **current codebase state** (AIDE-only backend + Gradio frontend).
 
-- Linux/MacOS/Windows with WSL
-- Python 3.8+
-- 4GB+ RAM
-- Optional: CUDA GPU for faster inference
+## 1. Architecture at Runtime
 
-## Installation (5 minutes)
+Two long-running processes are expected:
 
-### 1. Clone & Setup
+1. FastAPI backend (default port `8000`)
+2. Gradio frontend (default local URL around `7860`)
 
-```bash
-git clone https://github.com/thedannyliu/GAIC-Detector-Web-GUI.git
-cd GAIC-Detector-Web-GUI
-./setup.sh
-```
+Frontend calls backend via `GAIC_BACKEND_URL`.
 
-### 2. Configure (Optional)
+## 2. Prerequisites
 
-```bash
-# Edit environment file
-nano .env
+- Python 3.10
+- Conda environment with project dependencies
+- AIDE checkpoint at:
+  - `models/weights/GenImage_train.pth`
+- Optional: `GEMINI_API_KEY` for LLM report generation
 
-# Key settings:
-# - LLM_ENABLED=true (if using OpenAI)
-# - OPENAI_API_KEY=your_key
-```
-
-### 3. Get Models (Optional)
-
-**Option A: Use mock models** (immediate)
-- No action needed
-- System auto-detects missing weights
-- Good for testing UI/UX
-
-**Option B: Download real models**
-```bash
-./download_models.sh  # Update URLs first
-```
-
-**Option C: Manual download**
-```bash
-# Place .pth files in models/weights/
-# - susy.pth
-# - fatformer.pth
-# - distildire.pth
-```
-
-### 4. Launch
+## 3. Quick Start (Local)
 
 ```bash
-./start.sh
+conda activate gaic-detector
+bash start.sh
 ```
 
-Visit: http://localhost:7860
+This launches backend + frontend and writes logs to:
 
-## Docker Deployment (Alternative)
+- `logs/backend.log`
+- `logs/frontend.log`
+
+Stop services:
 
 ```bash
-# Build image
-docker build -t gaic-detector .
-
-# Run container
-docker run -p 8000:8000 -p 7860:7860 gaic-detector
+bash start.sh stop
 ```
 
-## Production Deployment
+## 4. Environment Variables
 
-### Using systemd
+Template file: `.env.example`
 
-1. Create service file:
+Common variables:
+
+- `API_HOST` (default `0.0.0.0`)
+- `API_PORT` (default `8000`)
+- `GAIC_BACKEND_URL` (default `http://localhost:${API_PORT}`)
+- `GEMINI_API_KEY` (empty means template fallback reports)
+- `GRADIO_SHARE`
+
+Important process behavior:
+
+- `submit_job.sh` loads `.env` automatically.
+- `start.sh` does not source `.env` automatically.
+- `start.sh` currently sets `GRADIO_SHARE=true` before launching frontend.
+
+If you need `.env` values locally with `start.sh`:
+
 ```bash
-sudo nano /etc/systemd/system/gaic-backend.service
+set -a
+source .env
+set +a
+bash start.sh
 ```
 
-```ini
-[Unit]
-Description=GAIC Detector Backend
-After=network.target
+## 5. PACE Phoenix Deployment (Slurm)
 
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/gaic-detector
-Environment="PATH=/opt/gaic-detector/venv/bin"
-ExecStart=/opt/gaic-detector/venv/bin/python -m app.main
-Restart=always
+Submit from login node:
 
-[Install]
-WantedBy=multi-user.target
-```
-
-2. Enable and start:
 ```bash
-sudo systemctl enable gaic-backend
-sudo systemctl start gaic-backend
+sbatch submit_job.sh
 ```
 
-### Using nginx reverse proxy
+What the script does:
 
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
+1. Activates `gaic-detector` conda env
+2. Loads `.env` if present
+3. Verifies AIDE checkpoint exists
+4. Runs `start.sh all`
 
-    # Frontend
-    location / {
-        proxy_pass http://127.0.0.1:7860;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
+Monitor logs:
 
-    # Backend API
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        client_max_body_size 10M;
-    }
-}
-```
-
-## Cloud Deployment
-
-### AWS EC2
 ```bash
-# t2.large or better recommended
-# Open ports 8000, 7860 in security group
-# Follow standard installation steps
-```
-
-### Google Cloud Run
-```bash
-gcloud run deploy gaic-detector \
-  --source . \
-  --port 7860 \
-  --memory 4Gi
-```
-
-### Heroku
-```bash
-heroku create gaic-detector
-git push heroku main
-```
-
-## Troubleshooting
-
-### Port already in use
-```bash
-# Kill existing processes
-lsof -ti:8000 | xargs kill -9
-lsof -ti:7860 | xargs kill -9
-```
-
-### Import errors
-```bash
-# Reinstall dependencies
-source venv/bin/activate
-pip install -r requirements.txt --force-reinstall
-```
-
-### Out of memory
-```bash
-# Reduce max image size in .env
-MAX_LONG_SIDE=1024
-```
-
-### Slow inference
-- Enable GPU if available
-- Use degraded stride mode
-- Reduce image resolution
-
-## Monitoring
-
-### Logs
-```bash
-# Backend logs
+tail -f logs/gaic_slurm_<jobid>.log
 tail -f logs/backend.log
-
-# Frontend access
-tail -f logs/gradio.log
+tail -f logs/frontend.log
 ```
 
-### Health checks
+Find public Gradio URL:
+
 ```bash
-# API health
+grep -i "public URL" logs/frontend.log
+```
+
+## 6. API/Media Limits (Source of Truth)
+
+Configured in `app/config.py`:
+
+- Images: 10 MB max
+- Videos: 50 MB max
+- Video duration: 300 seconds max
+- Sampled frames per video: 16
+
+If UI labels or external docs disagree with these values, treat `app/config.py` as authoritative.
+
+## 7. Operational Checks
+
+Health endpoint:
+
+```bash
 curl http://localhost:8000/
-
-# Test inference
-python test_api.py test_image.jpg
 ```
 
-## Security Checklist
-
-- [ ] Change default ports in production
-- [ ] Enable HTTPS (Let's Encrypt)
-- [ ] Set up firewall rules
-- [ ] Use environment variables for secrets
-- [ ] Enable rate limiting
-- [ ] Regular security updates
-- [ ] Monitor access logs
-
-## Performance Tuning
-
-### Backend
-```python
-# In app/config.py
-WORKERS = 4  # CPU cores
-MAX_QUEUE = 100
-```
-
-### Frontend
-```python
-# In gradio_app.py
-demo.queue(concurrency_count=10)
-```
-
-## Backup & Recovery
+Models endpoint:
 
 ```bash
-# Backup models
-tar -czf models-backup.tar.gz models/weights/
-
-# Backup configuration
-cp .env .env.backup
+curl http://localhost:8000/models
 ```
 
-## Updates
+API smoke test:
 
 ```bash
-git pull origin main
-source venv/bin/activate
-pip install -r requirements.txt --upgrade
-./start.sh
+python test_api.py
 ```
 
-## Support
+## 8. Common Failure Modes
 
-- GitHub Issues: https://github.com/thedannyliu/GAIC-Detector-Web-GUI/issues
-- Documentation: /docs/
-- Email: support@example.com
+### 8.1 Missing checkpoint
+
+Symptom: backend fails during first inference/model load.
+
+Fix:
+
+```bash
+bash download_aide_weights.sh
+```
+
+Ensure file exists:
+
+```bash
+ls -lh models/weights/GenImage_train.pth
+```
+
+### 8.2 Frontend cannot reach backend
+
+Symptom: frontend returns request/network errors.
+
+Check:
+
+- backend process is alive
+- backend bound to expected host/port
+- `GAIC_BACKEND_URL` visible in frontend process environment
+
+### 8.3 Gemini errors or timeout
+
+Behavior is non-fatal by design:
+
+- backend falls back to template report
+- `errors` array includes `REPORT_GEN_ERROR`
+
+### 8.4 Port conflict
+
+Use provided stop command first:
+
+```bash
+bash start.sh stop
+```
+
+Then restart.
+
+## 9. Security Notes
+
+- This repo is configured for research/demo usage by default.
+- CORS currently allows all origins.
+- Public Gradio sharing should be reviewed before production use.
+- Do not commit `.env` or private API keys.
+
+## 10. Production Hardening Checklist
+
+- Restrict CORS origins
+- Put backend behind authenticated gateway/reverse proxy
+- Enforce HTTPS/TLS at edge
+- Add request rate limiting and upload abuse protections
+- Centralize logs and health probes
+- Pin dependency versions for reproducible builds
+
