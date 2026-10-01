@@ -1,0 +1,7 @@
+# Lightweight HTTP contract tests; the detector itself is stubbed.
+fastapi
+httpx
+python-multipart
+numpy
+Pillow
+opencv-python-headless

@@ -96,9 +96,9 @@ start_backend() {
 start_frontend() {
     info "Starting Gradio frontend (port 7860)..."
 
-    # Enable Gradio public share link unconditionally
-    info "Enabling Gradio share link for direct web access."
-    export GRADIO_SHARE=true
+    # Respect the caller's share setting; use local access by default.
+    export GRADIO_SHARE="${GRADIO_SHARE:-false}"
+    info "Gradio share mode: $GRADIO_SHARE"
 
     nohup python -u gradio_app.py > logs/frontend.log 2>&1 &
     FRONTEND_PID=$!
@@ -145,8 +145,12 @@ print_access_info() {
     echo ""
     echo "── Public Web Access ───────────────────────────────────────"
     echo ""
-    echo "  A public Gradio link is being generated. Look for the "
-    echo "  'Running on public URL' line in your logs."
+    if [[ "${GRADIO_SHARE,,}" == "true" ]]; then
+        echo "  Look for 'Running on public URL' in logs/frontend.log."
+    else
+        echo "  Local mode: use the frontend URL in logs/frontend.log."
+        echo "  Set GRADIO_SHARE=true before launch to enable a public link."
+    fi
     echo ""
     echo "  To see the generated URL, run:"
     echo "    cat logs/frontend.log | grep -i 'public URL'"

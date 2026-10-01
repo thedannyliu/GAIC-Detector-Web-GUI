@@ -42,10 +42,10 @@ def test_model_loading():
     """Test if AIDE model can be loaded."""
     print("Testing AIDE model loading...")
     try:
-        from app.aide_model import get_aide_model
+        from app.aide_inference import get_aide_model
         model = get_aide_model()
         print("  ✓ AIDE model loaded successfully")
-        print(f"  ✓ Device: {model.model.device}")
+        print(f"  ✓ Device: {model.device}")
         print("✅ Model test passed\n")
         return True
     except Exception as e:
@@ -88,14 +88,14 @@ def test_gradcam():
     try:
         import torch
         import numpy as np
-        from app.aide_model import get_aide_model
+        from app.aide_inference import get_aide_model
         
         # Create dummy image
         dummy_image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
         
         # Run inference
         model = get_aide_model()
-        fake_prob, heatmap, inference_ms = model.predict(dummy_image, include_heatmap=True)
+        fake_prob, heatmap = model.predict(dummy_image, include_heatmap=True)
         
         if heatmap is not None and heatmap.shape == (224, 224):
             print(f"  ✓ Grad-CAM generated successfully")

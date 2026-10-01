@@ -124,22 +124,13 @@ async def analyze_image(
         # Load and preprocess image
         image_array, pil_image = load_and_preprocess_image(file_bytes)
         
-        # Run AIDE inference with Grad-CAM
-        try:
-            fake_prob, gradcam_heatmap, inference_ms = run_inference(
-                image_array,
-                include_heatmap=include_heatmap,
-                timeout=TIMEOUT_TOTAL
-            )
-        except GAICException as e:
-            if e.error_code == ErrorCode.MODEL_TIMEOUT:
-                raise
-            errors.append(e.error_code)
-            # For demo, use fallback values
-            fake_prob = 0.5
-            gradcam_heatmap = None
-            inference_ms = int((time.time() - start_time) * 1000)
-        
+        # Model failure is an error, not an invented neutral prediction.
+        fake_prob, gradcam_heatmap, inference_ms = run_inference(
+            image_array,
+            include_heatmap=include_heatmap,
+            timeout=TIMEOUT_TOTAL
+        )
+
         # Convert score to 0-100 integer
         score = int(fake_prob * 100)
         
@@ -260,7 +251,9 @@ async def analyze_video(
                 })
             except Exception as e:
                 print(f"Frame {idx} analysis failed: {e}")
-                # Skip failed frames
+                # Keep partial video results explicit in the API response.
+                code = e.error_code if isinstance(e, GAICException) else ErrorCode.MODEL_ERROR
+                errors.append(f"FRAME_{idx}_{code}")
                 continue
         
         if len(frame_results) == 0:
